@@ -1,7 +1,14 @@
-.pytest_cache/	
+# Python
 .venv/
-/data
-/dev
-/harness
-/tests
-/tools
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# OS
+.DS_Store
+Thumbs.db

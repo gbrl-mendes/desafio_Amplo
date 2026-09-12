@@ -1,0 +1,161 @@
+# Contrato de schema da tabela de ASVs — pós-DADA2, pós-BLASTr
+#
+# Gerado a partir do cabeçalho REAL da planilha mestre do projeto eDNA_cipo
+# (aba "Resultados completos" de eDNA_Cipo--Complete_results-2025-09-17.xlsx),
+# não de memória — para evitar inventar nomes de coluna incorretos.
+#
+# Cada coluna do arquivo real cai em um de quatro papéis:
+#
+#   input             -> dado bruto ou metadado de amostra. É o que o sistema
+#                        recebe como entrada e pode/deve usar.
+#   derived_recompute -> já vem calculado na planilha mestre, mas por um
+#                        pipeline DIFERENTE do que estamos portando (fórmulas
+#                        de pseudo-score/contaminação distintas). O sistema
+#                        deve calcular sua PRÓPRIA versão a partir das colunas
+#                        `input`, então esta coluna NUNCA deve estar presente
+#                        no arquivo de entrada do agente — se estiver, é sinal
+#                        de vazamento (o agente poderia copiar em vez de
+#                        derivar) e a validação deve recusar.
+#   gabarito          -> decisão humana de curadoria (Curated ID / Obs.
+#                        Curadoria). Nunca fica no input; comparação é feita
+#                        externamente pelo Gabriel, fora deste repositório.
+#   out_of_scope      -> fora do escopo do sistema por decisão explícita
+#                        (ex.: OTU/SWARM clustering).
+#
+# Este arquivo é o contrato editável: se uma categorização estiver errada,
+# ajuste aqui em vez de mexer na lógica das tools.
+
+source_reference: "eDNA_Cipo--Complete_results-2025-09-17.xlsx (aba: Resultados completos)"
+primary_key: "ASV (Sequence)"
+
+columns:
+  # --- Identificação de projeto / amostra (metadado) ---
+  - {name: "Researcher", role: input, required: true}
+  - {name: "Project", role: input, required: true}
+  - {name: "Primer", role: input, required: true}
+  - {name: "Sample", role: input, required: true}
+  - {name: "Unique_File_name", role: input, required: true}
+  - {name: "Read origin", role: input, required: false}
+  - {name: "obs", role: input, required: false}
+  - {name: "Type", role: input, required: true}
+
+  # --- Abundância (estatísticas básicas pós-DADA2, não são julgamento de curadoria) ---
+  - {name: "Total clean sample abd.", role: input, required: false}
+  - {name: "Clean relative abd. on sample", role: input, required: false}
+  - {name: "Relative abundance to all samples", role: input, required: false}
+  - {name: "Relative abundance on sample", role: input, required: false}
+  - {name: "Sample total abundance", role: input, required: true}
+  - {name: "ASV absolute abundance", role: input, required: true}
+  - {name: "ASV clean abs. abd.", role: input, required: false}
+
+  # --- Metadados de amostra (Metadata 1-12: automaticamente extraídos do nome da amostra) ---
+  - {name: "Metadata 1", role: input, required: true}
+  - {name: "Metadata 2", role: input, required: false}
+  - {name: "Metadata 3", role: input, required: false}
+  - {name: "Metadata 4", role: input, required: false}
+  - {name: "Metadata 5", role: input, required: false}
+  - {name: "Metadata 6", role: input, required: false}
+  - {name: "Metadata 7", role: input, required: false}
+  - {name: "Metadata 8", role: input, required: false}
+  - {name: "Metadata 9", role: input, required: false}
+  - {name: "Metadata 10", role: input, required: false}
+  - {name: "Metadata 11", role: input, required: false}
+  - {name: "Metadata 12", role: input, required: false}
+
+  # --- ASV: identificadores e tamanho bruto ---
+  - {name: "ASV header", role: input, required: true}
+  - {name: "ASV (Sequence)", role: input, required: true}
+  - {name: "Sequence (ASV tip)", role: input, required: false}
+  - {name: "ASV Size (pb)", role: input, required: true}
+
+  # --- Controles (necessários para a tool de contaminação) ---
+  - {name: "Ext. Control", role: input, required: false}
+  - {name: "PCR Control", role: input, required: false}
+  - {name: "Filt. Control", role: input, required: false}
+
+  # --- Hits brutos de BLAST (3 hits x ~14 campos cada) — a matéria-prima real ---
+  - {name: "1_subject header", role: input, required: true}
+  - {name: "1_staxid", role: input, required: true}
+  - {name: "1_subject", role: input, required: true}
+  - {name: "1_indentity", role: input, required: true}
+  - {name: "1_qcovhsp", role: input, required: true}
+  - {name: "1_length", role: input, required: false}
+  - {name: "1_mismatches", role: input, required: false}
+  - {name: "1_gaps", role: input, required: false}
+  - {name: "1_query start", role: input, required: false}
+  - {name: "1_query end", role: input, required: false}
+  - {name: "1_subject start", role: input, required: false}
+  - {name: "1_subject end", role: input, required: false}
+  - {name: "1_e-value", role: input, required: false}
+  - {name: "1_bitscore", role: input, required: false}
+  - {name: "2_subject header", role: input, required: true}
+  - {name: "2_staxid", role: input, required: true}
+  - {name: "2_subject", role: input, required: true}
+  - {name: "2_indentity", role: input, required: true}
+  - {name: "2_qcovhsp", role: input, required: true}
+  - {name: "2_length", role: input, required: false}
+  - {name: "2_mismatches", role: input, required: false}
+  - {name: "2_gaps", role: input, required: false}
+  - {name: "2_query start", role: input, required: false}
+  - {name: "2_query end", role: input, required: false}
+  - {name: "2_subject start", role: input, required: false}
+  - {name: "2_subject end", role: input, required: false}
+  - {name: "2_e-value", role: input, required: false}
+  - {name: "2_bitscore", role: input, required: false}
+  - {name: "3_subject header", role: input, required: true}
+  - {name: "3_staxid", role: input, required: true}
+  - {name: "3_subject", role: input, required: true}
+  - {name: "3_indentity", role: input, required: true}
+  - {name: "3_qcovhsp", role: input, required: true}
+  - {name: "3_length", role: input, required: false}
+  - {name: "3_mismatches", role: input, required: false}
+  - {name: "3_gaps", role: input, required: false}
+  - {name: "3_query start", role: input, required: false}
+  - {name: "3_query end", role: input, required: false}
+  - {name: "3_subject start", role: input, required: false}
+  - {name: "3_subject end", role: input, required: false}
+  - {name: "3_e-value", role: input, required: false}
+  - {name: "3_bitscore", role: input, required: false}
+
+  # --- Derivadas pelo pipeline ORIGINAL (fórmula diferente da nossa) — excluídas do input ---
+  - {name: "BLASTn pseudo-score", role: derived_recompute}
+  - {name: "Identification", role: derived_recompute}
+  - {name: "Identification Max. taxonomy", role: derived_recompute}
+  - {name: "Primer expected length", role: derived_recompute}
+  - {name: "Possible Metazoa", role: derived_recompute}
+  - {name: "Final ID (BLASTn)", role: derived_recompute}
+  - {name: "blast ID Origin", role: derived_recompute}
+  - {name: "ID status", role: derived_recompute}
+  - {name: "Contamination status", role: derived_recompute}
+  - {name: "BLAST ID", role: derived_recompute}
+  - {name: "Genus (NCBI)", role: derived_recompute}
+  - {name: "Subfamily (NCBI)", role: derived_recompute}
+  - {name: "Family (NCBI)", role: derived_recompute}
+  - {name: "Suborder (NCBI)", role: derived_recompute}
+  - {name: "Order (NCBI)", role: derived_recompute}
+  - {name: "Subclass (NCBI)", role: derived_recompute}
+  - {name: "Class (NCBI)", role: derived_recompute}
+  - {name: "Phylum (NCBI)", role: derived_recompute}
+  - {name: "Subphylum (NCBI)", role: derived_recompute}
+  - {name: "Kingdom (NCBI)", role: derived_recompute}
+  - {name: "Superkingdom (NCBI)", role: derived_recompute}
+  - {name: "Prop. to PCR control", role: derived_recompute}
+  - {name: "Prop. to Ext control", role: derived_recompute}
+  - {name: "Prop. to Filt control", role: derived_recompute}
+
+  # --- Gabarito (nunca no input do agente) ---
+  - {name: "Curated ID", role: gabarito}
+  - {name: "Obs. Curadoria", role: gabarito}
+
+  # --- Fora de escopo ---
+  - {name: "OTU", role: out_of_scope}
+
+# Colunas cujo valor pode conter múltiplos controles separados por ";" numa
+# única célula — bug real documentado no pipeline roots_metabar, que quebra a
+# suposição de "um controle por categoria" num join simples. A tool de
+# validação deve sinalizar isso explicitamente em vez de deixar passar
+# silenciosamente.
+multi_value_control_columns:
+  - "Ext. Control"
+  - "PCR Control"
+  - "Filt. Control"
