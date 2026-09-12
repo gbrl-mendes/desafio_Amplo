@@ -9,9 +9,14 @@
 #   [x] Bloco 1 - setup / parsing
 #   [x] Bloco 2 - refinamento de hits BLAST + limpeza de nome
 #   [x] Bloco 3 - taxonomia NCBI + contaminacao
-#   [x] Bloco 4 - curadoria final (faixas / Metazoa / pseudo-score / flags) (este arquivo, por enquanto)
-#   [ ] Bloco 5 - arvore filogenetica + extracao de vizinhos
-#   [ ] Bloco 6 - checagem regional GBIF + exportacao
+#   [x] Bloco 4 - curadoria final (faixas / Metazoa / pseudo-score / flags)
+#   [x] Bloco 5 - arvore filogenetica + extracao de vizinhos
+#   [x] Bloco 6 - checagem regional GBIF + exportacao
+#
+# Testado de ponta a ponta contra o CSV real de demonstracao (815 linhas,
+# 815 -> 103 colunas). "Exportacao" = escrever a tabela final via --output;
+# relatorio/log de execucao fica a cargo do harness (Python), nao deste
+# script.
 #
 # Uso via linha de comando:
 #   Rscript curadoria_deterministica.R <entrada.csv> [--config=config.yaml] [--output=saida.csv]
@@ -24,6 +29,9 @@
 library(tidyverse)
 library(yaml)
 library(taxize)
+library(DECIPHER)
+library(ape)
+library(rgbif)
 
 # ---- Localizacao do repositorio ------------------------------------------
 
@@ -71,7 +79,11 @@ DEFAULT_CONFIG <- list(
   checagem_regional = list(
     fonte = "gbif",
     checklist_path = NULL,
-    area = "bacia do Sao Francisco + entorno do PARNA/APA (declarada uma vez, nao por ponto)",
+    # Aproximado a partir do PARNA/APA Serra do Cipo -- decisao do Gabriel de
+    # nao usar bbox_buffer_km (sem margem programatica); se quiser uma area
+    # maior (ex. bacia do Sao Francisco inteira), e so declarar um bbox
+    # maior aqui ou via --config, nao adicionar um parametro de buffer.
+    area_bbox = list(lat_min = -19.6, lat_max = -19.1, long_min = -43.8, long_max = -43.3),
     bbox_buffer_km = NULL
   )
 )
@@ -729,6 +741,171 @@ run_final_curation <- function(df, config = DEFAULT_CONFIG) {
     flag_possible_metazoa()
 }
 
+# ---- Bloco 5: arvore filogenetica ASV-contra-ASV + vizinhos -----------------
+# Escopo fechado nas notas: so ASV-contra-ASV (sem banco de referencia
+# externo tipo LGC12Sdb, indisponivel neste ambiente); piso de tamanho = o
+# minimo de amplicon_por_primer (nao e um parametro proprio); k_vizinhos = 5
+# (validado no Apendice 2 do TCC da Isadora contra a arvore Newick real do
+# orientador). O METODO em si (alinhamento + distancia + algoritmo de
+# arvore) nao estava especificado nas notas -- decisao desta sessao:
+# DECIPHER::AlignSeqs (alinhamento multiplo) + ape::dist.dna(model="raw",
+# pairwise.deletion=TRUE) (distancia-p) + ape::nj (Neighbor-Joining), a
+# mesma dupla de pacotes que o proprio script de ecologia do projeto
+# (eDNA_cipo_script.qmd) ja importa.
+
+#' Converte um DNAStringSet (Biostrings) alinhado num objeto DNAbin (ape).
+dnastringset_to_dnabin <- function(dna_stringset) {
+  char_list <- as.character(dna_stringset)
+  mat <- do.call(rbind, base::strsplit(char_list, ""))
+  rownames(mat) <- names(dna_stringset)
+  ape::as.DNAbin(mat)
+}
+
+#' Monta a arvore NJ ASV-contra-ASV: pega sequencias UNICAS que passam no
+#' piso de tamanho do primer (config amplicon_por_primer), alinha e
+#' constroi a arvore. Retorna NULL (com aviso) se sobrarem menos de 3 ASVs
+#' -- nao da pra montar vizinhanca util com menos que isso.
+build_asv_tree <- function(df, amplicon_por_primer) {
+  unique_asvs <- df %>%
+    dplyr::distinct(Primer, `ASV (Sequence)`, `ASV header`) %>%
+    dplyr::rowwise() %>%
+    dplyr::mutate(.floor_bp = {
+      rng <- amplicon_por_primer[[Primer]]
+      if (is.null(rng)) NA_real_ else rng[[1]]
+    }) %>%
+    dplyr::ungroup() %>%
+    dplyr::filter(!is.na(.floor_bp), nchar(`ASV (Sequence)`) >= .floor_bp)
+
+  if (nrow(unique_asvs) < 3) {
+    warning(
+      "Menos de 3 ASVs unicas passam no piso de tamanho do primer -- ",
+      "arvore filogenetica pulada (vizinhos ficam NA).",
+      call. = FALSE
+    )
+    return(NULL)
+  }
+
+  dna_set <- Biostrings::DNAStringSet(unique_asvs$`ASV (Sequence)`)
+  names(dna_set) <- unique_asvs$`ASV header`
+
+  aligned <- DECIPHER::AlignSeqs(dna_set, anchor = NA, verbose = FALSE)
+  dna_bin <- dnastringset_to_dnabin(aligned)
+
+  # njs() (nao nj()) porque pairwise.deletion pode gerar NA quando duas ASVs
+  # nao tem nenhum sitio comparavel em comum no alinhamento -- njs() e a
+  # variante do Neighbor-Joining tolerante a distancias faltantes.
+  dist_matrix <- ape::dist.dna(dna_bin, model = "raw", pairwise.deletion = TRUE)
+  ape::njs(dist_matrix)
+}
+
+#' Extrai os k vizinhos mais proximos de cada ASV na arvore (por distancia
+#' patristica, ape::cophenetic.phylo) -- evidencia filogenetica auxiliar
+#' para uma eventual curadoria assistida por LLM (informa, nao decide
+#' sozinha).
+extract_k_neighbors <- function(tree, k = 5) {
+  if (is.null(tree)) {
+    return(tibble::tibble(`ASV header` = character(0), `Vizinhos filogeneticos (k)` = character(0)))
+  }
+
+  patristic <- ape::cophenetic.phylo(tree)
+
+  neighbor_strings <- vapply(rownames(patristic), function(tip) {
+    dists <- sort(patristic[tip, ])
+    dists <- dists[names(dists) != tip]
+    top_k <- names(dists)[seq_len(min(k, length(dists)))]
+    paste(top_k, collapse = "; ")
+  }, character(1))
+
+  tibble::tibble(
+    `ASV header` = rownames(patristic),
+    `Vizinhos filogeneticos (k)` = neighbor_strings
+  )
+}
+
+#' `ASV header` e a chave de join de volta pra tabela long-format: e a
+#' mesma pra todas as linhas-amostra de uma dada ASV (calculada uma vez no
+#' bloco 1), entao um lookup por ASV unica se propaga corretamente pra
+#' todas as ocorrencias dela.
+run_phylogenetic_tree <- function(df, config = DEFAULT_CONFIG) {
+  tree <- build_asv_tree(df, config$amplicon_por_primer)
+  neighbors <- extract_k_neighbors(tree, k = config$arvore_filogenetica$k_vizinhos)
+
+  df %>%
+    dplyr::left_join(neighbors, by = "ASV header")
+}
+
+# ---- Bloco 6: checagem regional GBIF -----------------------------------
+# fonte="gbif" e a area vem de config$checagem_regional (notas de
+# arquitetura). O script SO busca o FATO (quantos registros do GBIF existem
+# pra essa especie dentro da area declarada) -- decisao ja fechada nas
+# notas: a PLAUSIBILIDADE (a especie faz sentido aqui?) e julgamento de uma
+# skill de LLM mais adiante, nao um calculo deterministico daqui.
+# bbox_buffer_km permanece NULL por decisao explicita do Gabriel (sem
+# margem programatica -- se quiser area maior, e so declarar um bbox maior
+# no config, nao adicionar buffer em cima dele).
+
+#' Monta o poligono WKT (ordem "longitude latitude", como o GBIF espera) a
+#' partir do bounding box declarado no config.
+bbox_to_wkt <- function(area_bbox) {
+  sprintf(
+    "POLYGON((%f %f, %f %f, %f %f, %f %f, %f %f))",
+    area_bbox$long_min, area_bbox$lat_min,
+    area_bbox$long_max, area_bbox$lat_min,
+    area_bbox$long_max, area_bbox$lat_max,
+    area_bbox$long_min, area_bbox$lat_max,
+    area_bbox$long_min, area_bbox$lat_min
+  )
+}
+
+#' Conta registros do GBIF pra um nome cientifico dentro da area declarada.
+#' NA (nao 0) se a consulta falhar -- nao confundir "sem registro" com
+#' "nao consultou" (rede indisponivel, nome nao resolvido no GBIF etc.).
+gbif_regional_count <- function(scientific_name, wkt, verbose = TRUE) {
+  if (is.na(scientific_name) || !nzchar(scientific_name)) return(NA_integer_)
+  if (verbose) message(sprintf("GBIF: %s", scientific_name))
+  tryCatch(
+    {
+      res <- rgbif::occ_search(scientificName = scientific_name, geometry = wkt, limit = 1)
+      as.integer(res$meta$count)
+    },
+    error = function(e) {
+      warning(
+        sprintf("Falha na consulta GBIF para '%s': %s", scientific_name, conditionMessage(e)),
+        call. = FALSE
+      )
+      NA_integer_
+    }
+  )
+}
+
+#' So consulta o GBIF pra identificacoes em nivel de ESPECIE (onde faz
+#' sentido perguntar "essa especie ja foi registrada nessa regiao?");
+#' identificacoes em nivel de genero/familia/ordem/classe ou
+#' "Unidentified" ficam NA nesta coluna. Cacheia por nome unico (nao por
+#' linha) pra nao repetir a mesma consulta centenas de vezes.
+run_regional_check <- function(df, config = DEFAULT_CONFIG) {
+  if (!identical(config$checagem_regional$fonte, "gbif")) {
+    warning(
+      "checagem_regional$fonte != 'gbif' -- checagem regional pulada ",
+      "(sem implementacao alternativa ainda).",
+      call. = FALSE
+    )
+    return(dplyr::mutate(df, `GBIF regional occurrence count` = NA_integer_))
+  }
+
+  wkt <- bbox_to_wkt(config$checagem_regional$area_bbox)
+
+  species_lookup <- df %>%
+    dplyr::filter(`Identification Max. taxonomy` == "Species") %>%
+    dplyr::distinct(Identification) %>%
+    dplyr::mutate(
+      `GBIF regional occurrence count` = purrr::map_int(Identification, gbif_regional_count, wkt = wkt)
+    )
+
+  df %>%
+    dplyr::left_join(species_lookup, by = "Identification")
+}
+
 # ---- Entrada de linha de comando --------------------------------------------
 
 parse_cli_args <- function(args) {
@@ -781,6 +958,8 @@ main <- function(args) {
   df <- run_blast_refinement(df)
   df <- run_taxonomy_and_contamination(df, config = config)
   df <- run_final_curation(df, config = config)
+  df <- run_phylogenetic_tree(df, config = config)
+  df <- run_regional_check(df, config = config)
 
   cat(sprintf("Tabela parseada: %d linhas, %d colunas.\n", nrow(df), ncol(df)))
   cat("Colunas calculadas localmente: ASV Size (pb), Sample total abundance, ASV header.\n")
@@ -798,6 +977,14 @@ main <- function(args) {
   print(table(df$`Identification Max. taxonomy`, useNA = "always"))
   cat("Possible Metazoa:\n")
   print(table(df$`Possible Metazoa`, useNA = "always"))
+  cat(sprintf(
+    "Vizinhos filogeneticos calculados para %d de %d linhas (NA = ASV abaixo do piso de tamanho).\n",
+    sum(!is.na(df$`Vizinhos filogeneticos (k)`)), nrow(df)
+  ))
+  cat(sprintf(
+    "Checagem regional GBIF: %d linhas com identificacao em nivel de especie consultadas.\n",
+    sum(!is.na(df$`GBIF regional occurrence count`))
+  ))
   print(dplyr::glimpse(df))
 
   if (!is.null(parsed$output)) {
