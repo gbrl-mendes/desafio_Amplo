@@ -42,22 +42,36 @@ def test_valid_table_passes():
 
 
 def test_missing_required_column_is_blocking():
-    df = _base_valid_df().drop(columns=["ASV Size (pb)"])
+    df = _base_valid_df().drop(columns=["1_subject header"])
     report = validate_asv_table(df, schema=SCHEMA)
     assert not report.is_valid
     codes = [i.code for i in report.blocking]
     assert "missing_required_columns" in codes
     missing_issue = next(i for i in report.blocking if i.code == "missing_required_columns")
-    assert "ASV Size (pb)" in missing_issue.details
+    assert "1_subject header" in missing_issue.details
 
 
 def test_duplicate_primary_key_is_blocking():
+    # Primary key is composite (ASV (Sequence) + Unique_File_name): the table
+    # is long-format (one row per ASV x sample), so ASV (Sequence) alone
+    # repeats legitimately across samples and must not be flagged by itself.
     df = _base_valid_df(n_rows=2)
     df.loc[1, "ASV (Sequence)"] = df.loc[0, "ASV (Sequence)"]
+    df.loc[1, "Unique_File_name"] = df.loc[0, "Unique_File_name"]
     report = validate_asv_table(df, schema=SCHEMA)
     assert not report.is_valid
     codes = [i.code for i in report.blocking]
     assert "duplicate_primary_key" in codes
+
+
+def test_same_asv_across_different_samples_is_not_duplicate():
+    # Same ASV (Sequence) in two rows is expected (long-format table) as long
+    # as Unique_File_name differs — must NOT be flagged as a duplicate key.
+    df = _base_valid_df(n_rows=2)
+    df.loc[1, "ASV (Sequence)"] = df.loc[0, "ASV (Sequence)"]
+    assert df.loc[0, "Unique_File_name"] != df.loc[1, "Unique_File_name"]
+    report = validate_asv_table(df, schema=SCHEMA)
+    assert report.is_valid, report.summary()
 
 
 def test_leakage_column_present_is_blocking():

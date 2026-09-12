@@ -107,6 +107,7 @@ def validate_asv_table(df: pd.DataFrame, schema: dict | None = None) -> Validati
     leakage_cols = _columns_by_role(schema, "derived_recompute") + _columns_by_role(schema, "gabarito")
     out_of_scope_cols = _columns_by_role(schema, "out_of_scope")
     primary_key = schema.get("primary_key")
+    primary_key_cols = [primary_key] if isinstance(primary_key, str) else list(primary_key or [])
     multi_value_cols = schema.get("multi_value_control_columns", [])
 
     present = set(df.columns)
@@ -146,24 +147,28 @@ def validate_asv_table(df: pd.DataFrame, schema: dict | None = None) -> Validati
             details=present_out_of_scope,
         )
 
-    # 3. Primary key uniqueness.
-    if primary_key and primary_key in present:
-        dup_mask = df[primary_key].duplicated(keep=False)
+    # 3. Primary key uniqueness (may be a single column or a composite list).
+    missing_pk_cols = [c for c in primary_key_cols if c not in present]
+    if primary_key_cols and not missing_pk_cols:
+        dup_mask = df.duplicated(subset=primary_key_cols, keep=False)
         if dup_mask.any():
-            dup_values = sorted(set(df.loc[dup_mask, primary_key].astype(str)))
+            dup_values = sorted(
+                {" | ".join(str(v) for v in row) for row in df.loc[dup_mask, primary_key_cols].itertuples(index=False)}
+            )
+            pk_label = " + ".join(primary_key_cols)
             report.add(
                 level="blocking",
                 code="duplicate_primary_key",
-                message=f"Chave primária '{primary_key}' não é única — {len(dup_values)} valor(es) duplicado(s).",
+                message=f"Chave primária '{pk_label}' não é única — {len(dup_values)} combinação(ões) duplicada(s).",
                 details=dup_values,
             )
-    elif primary_key and primary_key not in present:
-        # Already covered by missing_required_columns if it was required, but
-        # guard against a schema edit that un-marks it as required.
+    elif missing_pk_cols:
+        # Already covered by missing_required_columns if those columns were
+        # required, but guard against a schema edit that un-marks them.
         report.add(
             level="blocking",
             code="missing_primary_key",
-            message=f"Coluna de chave primária '{primary_key}' não está presente na tabela.",
+            message=f"Coluna(s) de chave primária ausente(s) da tabela: {', '.join(missing_pk_cols)}.",
         )
 
     # 4. Documented edge case: multiple controls in one cell separated by ";".

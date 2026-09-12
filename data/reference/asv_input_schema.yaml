@@ -4,10 +4,19 @@
 # (aba "Resultados completos" de eDNA_Cipo--Complete_results-2025-09-17.xlsx),
 # não de memória — para evitar inventar nomes de coluna incorretos.
 #
-# Cada coluna do arquivo real cai em um de quatro papéis:
+# Cada coluna do arquivo real cai em um de cinco papéis:
 #
 #   input             -> dado bruto ou metadado de amostra. É o que o sistema
 #                        recebe como entrada e pode/deve usar.
+#   derived_local     -> NÃO vem no CSV bruto do BLASTr (só existia na planilha
+#                        mestre, calculada por um processo externo). É
+#                        recomputada localmente, sempre, a partir de colunas
+#                        `input`, no bloco de setup/parsing do
+#                        curadoria_deterministica.R — não é exigida na entrada
+#                        e não é tratada como vazamento se vier presente
+#                        (é só um dado estrutural simples — tamanho de
+#                        sequência, soma de abundância —, não um julgamento de
+#                        curadoria nem uma fórmula concorrente).
 #   derived_recompute -> já vem calculado na planilha mestre, mas por um
 #                        pipeline DIFERENTE do que estamos portando (fórmulas
 #                        de pseudo-score/contaminação distintas). O sistema
@@ -26,7 +35,13 @@
 # ajuste aqui em vez de mexer na lógica das tools.
 
 source_reference: "eDNA_Cipo--Complete_results-2025-09-17.xlsx (aba: Resultados completos)"
-primary_key: "ASV (Sequence)"
+
+# A tabela é long-format: uma linha por combinação ASV x amostra, não uma
+# linha por ASV única. "ASV (Sequence)" sozinha se repete por amostra (cada
+# ASV real aparece em várias amostras) — confirmado contra o CSV real de
+# 2026-09-12 (82 valores de ASV (Sequence) duplicados quando tratada como
+# chave única). A chave real é composta.
+primary_key: ["ASV (Sequence)", "Unique_File_name"]
 
 columns:
   # --- Identificação de projeto / amostra (metadado) ---
@@ -44,7 +59,6 @@ columns:
   - {name: "Clean relative abd. on sample", role: input, required: false}
   - {name: "Relative abundance to all samples", role: input, required: false}
   - {name: "Relative abundance on sample", role: input, required: false}
-  - {name: "Sample total abundance", role: input, required: true}
   - {name: "ASV absolute abundance", role: input, required: true}
   - {name: "ASV clean abs. abd.", role: input, required: false}
 
@@ -63,10 +77,8 @@ columns:
   - {name: "Metadata 12", role: input, required: false}
 
   # --- ASV: identificadores e tamanho bruto ---
-  - {name: "ASV header", role: input, required: true}
   - {name: "ASV (Sequence)", role: input, required: true}
   - {name: "Sequence (ASV tip)", role: input, required: false}
-  - {name: "ASV Size (pb)", role: input, required: true}
 
   # --- Controles (necessários para a tool de contaminação) ---
   - {name: "Ext. Control", role: input, required: false}
@@ -116,6 +128,19 @@ columns:
   - {name: "3_subject end", role: input, required: false}
   - {name: "3_e-value", role: input, required: false}
   - {name: "3_bitscore", role: input, required: false}
+
+  # --- Calculadas localmente no setup/parsing do curadoria_deterministica.R ---
+  # (não vêm no CSV bruto do BLASTr; ausentes é o esperado, não um erro)
+  #   ASV Size (pb)          = nchar(`ASV (Sequence)`)
+  #   Sample total abundance = soma de `ASV absolute abundance` agrupada por
+  #                            `Sample` (idêntico a Unique_File_name aqui)
+  #   ASV header             = ">ASV_{posição}-{tamanho}bp", onde posição é o
+  #                            rank da ASV após deduplicar por sequência única
+  #                            e ordenar por tamanho decrescente (ex.:
+  #                            ">ASV_2422-168bp")
+  - {name: "ASV Size (pb)", role: derived_local, required: false}
+  - {name: "Sample total abundance", role: derived_local, required: false}
+  - {name: "ASV header", role: derived_local, required: false}
 
   # --- Derivadas pelo pipeline ORIGINAL (fórmula diferente da nossa) — excluídas do input ---
   - {name: "BLASTn pseudo-score", role: derived_recompute}

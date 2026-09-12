@@ -12,3 +12,6 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# LibreOffice/OpenOffice lock files (left behind when a CSV/xlsx is open)
+.~lock.*#
