@@ -15,3 +15,7 @@ Thumbs.db
 
 # LibreOffice/OpenOffice lock files (left behind when a CSV/xlsx is open)
 .~lock.*#
+
+# Logs de execucao do harness (harness/orchestrator.py) -- gerados a cada
+# run, nao sao codigo nem dado de demonstracao.
+/runs/

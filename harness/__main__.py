@@ -1,0 +1,83 @@
+"""Ponto de entrada do harness: `python -m harness <entrada.csv> [opcoes]`.
+
+Ve `orchestrator.run` para o fluxo completo (validar -> rodar R -> verificar
+-> logar). Este modulo so cuida de argumentos de linha de comando e do
+codigo de saida do processo, que reflete o status do run:
+  0 = sucesso, 2 = entrada recusada pela validacao, 3 = falha de execucao
+  (R ausente, erro no script R, verificacao pos-execucao reprovada, etc.).
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+from harness.orchestrator import DEFAULT_RUNS_DIR, run
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m harness",
+        description="Roda a curadoria deterministica de ASVs (eDNA_Cipo, MiFish2) sobre um CSV de entrada.",
+    )
+    parser.add_argument("input_csv", help="Caminho do CSV de entrada (schema em data/reference/asv_input_schema.yaml).")
+    parser.add_argument(
+        "--config",
+        dest="config_path",
+        default=None,
+        help="YAML opcional sobrescrevendo os parametros deterministicos padrao (registrado no log do run).",
+    )
+    parser.add_argument(
+        "--output",
+        dest="output_csv",
+        default=None,
+        help="Caminho do CSV de saida (default: runs/<nome-da-entrada>_curado.csv).",
+    )
+    parser.add_argument(
+        "--runs-dir",
+        default=str(DEFAULT_RUNS_DIR),
+        help="Pasta onde gravar o log JSON de cada run (default: runs/).",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+
+    result = run(
+        input_csv=args.input_csv,
+        config_path=args.config_path,
+        output_csv=args.output_csv,
+        runs_dir=args.runs_dir,
+    )
+
+    print(f"Status: {result.status}")
+    print(result.validation_summary)
+    if result.validation_warnings:
+        print("Avisos de validacao:")
+        for w in result.validation_warnings:
+            print(f"  - {w}")
+
+    if result.status == "refused":
+        print("\nEntrada recusada -- corrija os problemas bloqueantes acima e rode novamente.")
+        return 2
+
+    if result.status == "failed":
+        if result.error:
+            print(f"\nFalha: {result.error}")
+        if result.r_exit_code not in (None, 0):
+            print(f"\nR terminou com codigo {result.r_exit_code}. Ultimas linhas do stderr:")
+            print(result.r_stderr_tail)
+        if result.verification_issues:
+            print("\nVerificacao pos-execucao reprovada:")
+            for issue in result.verification_issues:
+                print(f"  - {issue}")
+        return 3
+
+    print(f"\nSucesso. Saida em: {result.output_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

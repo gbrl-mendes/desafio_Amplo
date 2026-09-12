@@ -26,6 +26,16 @@
 # impede que main() rode sozinho, entao as funcoes abaixo ficam disponiveis
 # para chamar uma a uma e inspecionar o resultado no Data Explorer.
 
+# Garante que a biblioteca pessoal do usuario entra em .libPaths() mesmo
+# quando o script e chamado como subprocesso (ex. pelo harness em Python via
+# subprocess.run) -- um subprocesso nao herda necessariamente o mesmo
+# ambiente de uma sessao interativa de terminal/RStudio, entao nao da pra
+# depender de R_LIBS_USER ja estar exportado por quem chama.
+user_lib <- Sys.getenv("R_LIBS_USER")
+if (nzchar(user_lib) && dir.exists(user_lib) && !(user_lib %in% .libPaths())) {
+  .libPaths(c(user_lib, .libPaths()))
+}
+
 library(tidyverse)
 library(yaml)
 library(taxize)
@@ -529,6 +539,13 @@ foldchange <- function(num, denom) {
   ifelse(num >= denom, num / denom, -denom / num)
 }
 
+#' max(x, na.rm = TRUE), mas sem o aviso "no non-missing arguments" e sem
+#' devolver -Inf quando o grupo e todo NA (ex. dataset sem nenhuma amostra
+#' de controle) -- devolve NA_real_ de forma limpa nesse caso.
+safe_max <- function(x) {
+  if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)
+}
+
 #' Para cada linha (ASV numa amostra real), compara com o(s) controle(s) que
 #' ela referencia via Fold Change (abundancia relativa da amostra dividida
 #' pela abundancia relativa maxima da MESMA ASV no controle referenciado).
@@ -557,7 +574,7 @@ flag_contamination <- function(df, fold_change_threshold = 10) {
   contam_lookup <- df %>%
     dplyr::filter(`ASV absolute abundance` > 0, Type %in% CONTROL_TYPE_VALUES) %>%
     dplyr::group_by(Primer, Unique_File_name, `ASV (Sequence)`) %>%
-    dplyr::summarise(Max_ctrl_abd = max(`Relative Abundance Sample`, na.rm = TRUE), .groups = "drop")
+    dplyr::summarise(Max_ctrl_abd = safe_max(`Relative Abundance Sample`), .groups = "drop")
 
   for (ctrl_col in ctrl_cols) {
     target_col <- CONTROL_REFERENCE_COLUMNS[[ctrl_col]]
@@ -570,7 +587,7 @@ flag_contamination <- function(df, fold_change_threshold = 10) {
         by = c("Primer", ".ctrl_ref" = "Unique_File_name", "ASV (Sequence)")
       ) %>%
       dplyr::group_by(Primer, Unique_File_name, `ASV (Sequence)`) %>%
-      dplyr::summarise(Max_ctrl_abd = max(Max_ctrl_abd, na.rm = TRUE), .groups = "drop")
+      dplyr::summarise(Max_ctrl_abd = safe_max(Max_ctrl_abd), .groups = "drop")
 
     df <- df %>%
       dplyr::left_join(ctrl_matched, by = c("Primer", "Unique_File_name", "ASV (Sequence)")) %>%
