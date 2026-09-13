@@ -1010,7 +1010,91 @@ A fonte e a área da checagem regional vêm de `config$checagem_regional` (`font
   }
   ```
 
-## 8. Entrada de Linha de Comando
+## 8. Padronização Final das Colunas de Output
+
+Por decisão do Gabriel, o CSV exportado é reordenado/filtrado pra ficar compatível com o output "long" histórico do projeto (aba "Resultados completos" de `eDNA_Cipo--Complete_results-2025-09-17.xlsx`): colunas em comum entram na mesma ordem do arquivo original; colunas que são versões renomeadas/corrigidas de uma coluna original (`Possible target taxon` no lugar de `Possible Metazoa`; `Ponto`/`Latitude`/`Longitude`/`Habitat`/`Rios` no lugar de `Metadata 1`/`8`/`9`/`10`/`11`) ficam na posição que a coluna original ocupava; colunas 100% novas deste sistema (sem equivalente no original — vizinhos filogenéticos, contagem GBIF, Fold Change de contaminação, presença de controle) são mantidas no final do output. Colunas puramente internas de processamento (`query_taxID`, ranks "extra" do taxize como `superclass`/`infraclass`, `Relative Abundance Sample`) continuam calculadas e usadas durante o pipeline, mas não aparecem no CSV final.
+
+- **Ordem de colunas do output "long" histórico.** Cabeçalho real da aba "Resultados completos" — usado só para reordenar/selecionar a saída final, não influencia nenhum cálculo.
+
+  ```{r}
+  ORIGINAL_LONG_COLUMN_ORDER <- c(
+    "Researcher", "Project", "BLASTn pseudo-score", "Identification",
+    "Identification Max. taxonomy", "Primer", "Sample", "Unique_File_name",
+    "Read origin", "Total clean sample abd.", "Clean relative abd. on sample",
+    "Relative abundance to all samples", "Relative abundance on sample",
+    "Sample total abundance", "ASV absolute abundance", "Metadata 1",
+    "Metadata 2", "Metadata 3", "Metadata 4", "Metadata 5", "Metadata 6",
+    "Metadata 7", "Metadata 8", "Metadata 9", "Metadata 10", "Metadata 11",
+    "Metadata 12", "obs", "Primer expected length", "ASV Size (pb)",
+    "Possible Metazoa", "Curated ID", "Final ID (BLASTn)", "blast ID Origin",
+    "ID status", "Contamination status", "ASV clean abs. abd.", "BLAST ID",
+    "Genus (NCBI)", "Subfamily (NCBI)", "Family (NCBI)", "Suborder (NCBI)",
+    "Order (NCBI)", "Subclass (NCBI)", "Class (NCBI)", "Phylum (NCBI)",
+    "Subphylum (NCBI)", "Kingdom (NCBI)", "Superkingdom (NCBI)",
+    "1_subject header", "1_staxid", "1_subject", "1_indentity", "1_qcovhsp",
+    "1_length", "1_mismatches", "1_gaps", "1_query start", "1_query end",
+    "1_subject start", "1_subject end", "1_e-value", "1_bitscore",
+    "2_subject header", "2_staxid", "2_subject", "2_indentity", "2_qcovhsp",
+    "2_length", "2_mismatches", "2_gaps", "2_query start", "2_query end",
+    "2_subject start", "2_subject end", "2_e-value", "2_bitscore",
+    "3_subject header", "3_staxid", "3_subject", "3_indentity", "3_qcovhsp",
+    "3_length", "3_mismatches", "3_gaps", "3_query start", "3_query end",
+    "3_subject start", "3_subject end", "3_e-value", "3_bitscore",
+    "ASV header", "ASV (Sequence)", "Sequence (ASV tip)", "OTU",
+    "Ext. Control", "PCR Control", "Filt. Control", "Prop. to PCR control",
+    "Prop. to Ext control", "Prop. to Filt control", "Type"
+  )
+  ```
+
+- **Colunas renomeadas equivalentes.** Mapeia o nome da nossa coluna para o nome da coluna original que ela substitui — assim a coluna nova ocupa a posição da antiga em vez de ser tratada como novidade sem relação.
+
+  ```{r}
+  COLUMN_EQUIVALENTS <- c(
+    "Possible target taxon" = "Possible Metazoa",
+    "Ponto" = "Metadata 1",
+    "Latitude" = "Metadata 8",
+    "Longitude" = "Metadata 9",
+    "Habitat" = "Metadata 10",
+    "Rios" = "Metadata 11"
+  )
+  ```
+
+- **Colunas 100% novas.** Sem equivalente no output original — mantidas no final, na ordem em que são calculadas pelo pipeline.
+
+  ```{r}
+  NEW_OUTPUT_COLUMNS <- c(
+    "Selected_Hit_Origin", "FC to Ext control", "FC to Filt control",
+    "Control presence", "Vizinhos filogeneticos (k)",
+    "GBIF regional occurrence count"
+  )
+  ```
+
+- **Finalizar colunas do output.** Reordena/seleciona: colunas comuns (ou suas equivalentes renomeadas) na ordem do output histórico, seguidas das colunas 100% novas. Qualquer outra coluna (interna/de processamento) é descartada do export final.
+
+  ```{r}
+  finalize_output_columns <- function(df, original_order = ORIGINAL_LONG_COLUMN_ORDER,
+                                       equivalents = COLUMN_EQUIVALENTS,
+                                       new_columns = NEW_OUTPUT_COLUMNS) {
+    reverse_equivalents <- setNames(names(equivalents), equivalents)
+
+    ordered_cols <- purrr::map_chr(original_order, function(original_name) {
+      # `[` (nao `[[`) num vetor nomeado atomico devolve NA pra chave
+      # ausente em vez de dar erro -- reverse_equivalents e um vetor, nao
+      # uma lista.
+      our_name <- unname(reverse_equivalents[original_name])
+      if (!is.na(our_name) && our_name %in% colnames(df)) return(our_name)
+      if (original_name %in% colnames(df)) return(original_name)
+      NA_character_
+    })
+    ordered_cols <- ordered_cols[!is.na(ordered_cols)]
+
+    new_cols_present <- intersect(new_columns, colnames(df))
+
+    dplyr::select(df, dplyr::all_of(c(ordered_cols, new_cols_present)))
+  }
+  ```
+
+## 9. Entrada de Linha de Comando
 
 - **Parsear argumentos da CLI.** Extrai o caminho de entrada e as flags opcionais `--config=` e `--output=` de `commandArgs()`.
 
@@ -1041,9 +1125,9 @@ A fonte e a área da checagem regional vêm de `config$checagem_regional` (`font
   }
   ```
 
-## 9. Função Principal
+## 10. Função Principal
 
-- **Executar o pipeline completo.** Encadeia todos os blocos (1 a 6), imprime um resumo de diagnóstico no console e, se `--output` foi informado, exporta a tabela final via `write_csv2`.
+- **Executar o pipeline completo.** Encadeia todos os blocos (1 a 6), finaliza as colunas do output (seção 8), imprime um resumo de diagnóstico no console e, se `--output` foi informado, exporta a tabela final via `write_csv2`.
 
   ```{r}
   main <- function(args) {
@@ -1056,6 +1140,7 @@ A fonte e a área da checagem regional vêm de `config$checagem_regional` (`font
     df <- run_final_curation(df, config = config)
     df <- run_phylogenetic_tree(df, config = config)
     df <- run_regional_check(df, config = config)
+    df <- finalize_output_columns(df)
 
     cat(sprintf("Tabela parseada: %d linhas, %d colunas.\n", nrow(df), ncol(df)))
     cat("Colunas calculadas localmente: ASV Size (pb), Sample total abundance, ASV header.\n")

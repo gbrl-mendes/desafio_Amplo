@@ -763,6 +763,70 @@ run_regional_check <- function(df, config = DEFAULT_CONFIG) {
     dplyr::left_join(species_lookup, by = "Identification")
 }
 
+ORIGINAL_LONG_COLUMN_ORDER <- c(
+  "Researcher", "Project", "BLASTn pseudo-score", "Identification",
+  "Identification Max. taxonomy", "Primer", "Sample", "Unique_File_name",
+  "Read origin", "Total clean sample abd.", "Clean relative abd. on sample",
+  "Relative abundance to all samples", "Relative abundance on sample",
+  "Sample total abundance", "ASV absolute abundance", "Metadata 1",
+  "Metadata 2", "Metadata 3", "Metadata 4", "Metadata 5", "Metadata 6",
+  "Metadata 7", "Metadata 8", "Metadata 9", "Metadata 10", "Metadata 11",
+  "Metadata 12", "obs", "Primer expected length", "ASV Size (pb)",
+  "Possible Metazoa", "Curated ID", "Final ID (BLASTn)", "blast ID Origin",
+  "ID status", "Contamination status", "ASV clean abs. abd.", "BLAST ID",
+  "Genus (NCBI)", "Subfamily (NCBI)", "Family (NCBI)", "Suborder (NCBI)",
+  "Order (NCBI)", "Subclass (NCBI)", "Class (NCBI)", "Phylum (NCBI)",
+  "Subphylum (NCBI)", "Kingdom (NCBI)", "Superkingdom (NCBI)",
+  "1_subject header", "1_staxid", "1_subject", "1_indentity", "1_qcovhsp",
+  "1_length", "1_mismatches", "1_gaps", "1_query start", "1_query end",
+  "1_subject start", "1_subject end", "1_e-value", "1_bitscore",
+  "2_subject header", "2_staxid", "2_subject", "2_indentity", "2_qcovhsp",
+  "2_length", "2_mismatches", "2_gaps", "2_query start", "2_query end",
+  "2_subject start", "2_subject end", "2_e-value", "2_bitscore",
+  "3_subject header", "3_staxid", "3_subject", "3_indentity", "3_qcovhsp",
+  "3_length", "3_mismatches", "3_gaps", "3_query start", "3_query end",
+  "3_subject start", "3_subject end", "3_e-value", "3_bitscore",
+  "ASV header", "ASV (Sequence)", "Sequence (ASV tip)", "OTU",
+  "Ext. Control", "PCR Control", "Filt. Control", "Prop. to PCR control",
+  "Prop. to Ext control", "Prop. to Filt control", "Type"
+)
+
+COLUMN_EQUIVALENTS <- c(
+  "Possible target taxon" = "Possible Metazoa",
+  "Ponto" = "Metadata 1",
+  "Latitude" = "Metadata 8",
+  "Longitude" = "Metadata 9",
+  "Habitat" = "Metadata 10",
+  "Rios" = "Metadata 11"
+)
+
+NEW_OUTPUT_COLUMNS <- c(
+  "Selected_Hit_Origin", "FC to Ext control", "FC to Filt control",
+  "Control presence", "Vizinhos filogeneticos (k)",
+  "GBIF regional occurrence count"
+)
+
+finalize_output_columns <- function(df, original_order = ORIGINAL_LONG_COLUMN_ORDER,
+                                     equivalents = COLUMN_EQUIVALENTS,
+                                     new_columns = NEW_OUTPUT_COLUMNS) {
+  reverse_equivalents <- setNames(names(equivalents), equivalents)
+
+  ordered_cols <- purrr::map_chr(original_order, function(original_name) {
+    # `[` (nao `[[`) num vetor nomeado atomico devolve NA pra chave
+    # ausente em vez de dar erro -- reverse_equivalents e um vetor, nao
+    # uma lista.
+    our_name <- unname(reverse_equivalents[original_name])
+    if (!is.na(our_name) && our_name %in% colnames(df)) return(our_name)
+    if (original_name %in% colnames(df)) return(original_name)
+    NA_character_
+  })
+  ordered_cols <- ordered_cols[!is.na(ordered_cols)]
+
+  new_cols_present <- intersect(new_columns, colnames(df))
+
+  dplyr::select(df, dplyr::all_of(c(ordered_cols, new_cols_present)))
+}
+
 parse_cli_args <- function(args) {
   config_path <- NULL
   output_path <- NULL
@@ -798,6 +862,7 @@ main <- function(args) {
   df <- run_final_curation(df, config = config)
   df <- run_phylogenetic_tree(df, config = config)
   df <- run_regional_check(df, config = config)
+  df <- finalize_output_columns(df)
 
   cat(sprintf("Tabela parseada: %d linhas, %d colunas.\n", nrow(df), ncol(df)))
   cat("Colunas calculadas localmente: ASV Size (pb), Sample total abundance, ASV header.\n")

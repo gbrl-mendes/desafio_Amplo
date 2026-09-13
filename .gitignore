@@ -23,3 +23,6 @@ Thumbs.db
 # Backups pessoais e notas de handoff -- nao fazem parte do pacote entregue.
 /r/old/
 /RESUMO_SESSAO.md
+
+# Saidas de teste manuais (ex. rodadas experimentais no Positron).
+/saida_teste.csv
