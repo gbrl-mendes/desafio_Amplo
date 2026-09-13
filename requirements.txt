@@ -1,0 +1,9 @@
+# Dependencias do harness (tools/, harness/) -- validacao de schema,
+# orquestracao do R, curadoria assistida por LLM via Groq.
+pandas==3.0.5
+PyYAML==6.0.3
+requests==2.34.2
+
+# Dev/testes (tests/, pytest.ini implicito) -- nao necessario so pra rodar
+# `python -m harness`, so pra rodar a suite de testes.
+pytest==9.1.1
