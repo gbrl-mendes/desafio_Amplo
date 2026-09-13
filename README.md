@@ -83,9 +83,7 @@ pytest tests/ -v
 
 37 testes, cobrindo `tools/schema_validation.py`, `harness/orchestrator.py`, `harness/llm_curation.py` e `harness/report_generation.py`. Todos usam substitutos falsos no lugar de dependências externas (um R falso, uma chamada de LLM simulada) e não precisam de R instalado, acesso à rede, nem uma chave de API real para rodar.
 
-## Nota de segurança sobre a chave em `.env`
-
-Este repositório está **privado**, e a chave da Groq incluída em `.env` foi deixada de propósito, por decisão do autor, para reduzir a fricção de quem for avaliar este desafio (sem precisar criar conta própria). Uma variável de ambiente `GROQ_API_KEY` já definida no sistema tem prioridade sobre o valor do arquivo, então quem preferir usar a própria chave pode simplesmente sobrescrever, sem editar nada.
+# 
 
 ## Contato
 
