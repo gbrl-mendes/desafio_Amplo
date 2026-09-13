@@ -83,8 +83,8 @@ pytest tests/ -v
 
 37 testes, cobrindo `tools/schema_validation.py`, `harness/orchestrator.py`, `harness/llm_curation.py` e `harness/report_generation.py`. Todos usam substitutos falsos no lugar de dependências externas (um R falso, uma chamada de LLM simulada) e não precisam de R instalado, acesso à rede, nem uma chave de API real para rodar.
 
-# 
-
 ## Contato
 
 Para mais informações, entre em contato comigo através do meu endereço de [e-mail](mailto:gabrielmendesbrt@outlook.com) 😊
+
+
