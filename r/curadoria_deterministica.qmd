@@ -56,7 +56,7 @@ Os blocos estão organizados assim:
 
 ### Localização do repositório
 
-- **Resolver a raiz do repo.** Funciona tanto rodando via `Rscript` quanto de dentro do RStudio/Positron (onde não há `--file=` em `commandArgs`).
+- **Resolver a raiz do repo e fixar o diretório de trabalho.** Funciona tanto rodando via `Rscript` quanto de dentro do RStudio/Positron (onde não há `--file=` em `commandArgs`). Além de localizar o schema, também chama `setwd(REPO_ROOT)` — sem isso, caminhos relativos passados na CLI (`data/example/...`) só resolviam corretamente quando a sessão já tinha sido aberta na raiz do repo por acaso; abrir o `.qmd`/`.R` de dentro do Positron normalmente deixa o diretório de trabalho em outro lugar (ex. a pasta pessoal do usuário), quebrando qualquer caminho relativo passado pro script.
 
   ```{r}
   get_repo_root <- function() {
@@ -75,6 +75,11 @@ Os blocos estão organizados assim:
 
   REPO_ROOT <- get_repo_root()
   SCHEMA_PATH <- file.path(REPO_ROOT, "data", "reference", "asv_input_schema.yaml")
+
+  if (!identical(normalizePath(getwd()), normalizePath(REPO_ROOT))) {
+    message(sprintf("Ajustando diretorio de trabalho para a raiz do repo: %s", REPO_ROOT))
+    setwd(REPO_ROOT)
+  }
   ```
 
 ### Configuração

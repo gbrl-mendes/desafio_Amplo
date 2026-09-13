@@ -34,6 +34,11 @@ get_repo_root <- function() {
 REPO_ROOT <- get_repo_root()
 SCHEMA_PATH <- file.path(REPO_ROOT, "data", "reference", "asv_input_schema.yaml")
 
+if (!identical(normalizePath(getwd()), normalizePath(REPO_ROOT))) {
+  message(sprintf("Ajustando diretorio de trabalho para a raiz do repo: %s", REPO_ROOT))
+  setwd(REPO_ROOT)
+}
+
 DEFAULT_CONFIG <- list(
   metadados = list(
     # Mapeia o nome bruto de cada coluna de metadado (como chega no CSV)
