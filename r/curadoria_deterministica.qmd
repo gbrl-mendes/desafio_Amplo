@@ -10,7 +10,7 @@ chunk_output_type: console
 
 # Curadoria Determinística de ASVs
 
-Este documento descreve, em blocos, a curadoria taxonômica determinística da tabela de ASVs do projeto **desafio_Amplo**. Nenhuma etapa aqui depende de interpretação de um LLM — tudo é reproduzível a partir de parâmetros declarados em configuração (YAML), com os defaults documentados ao longo deste documento e detalhados nas notas de arquitetura (`claude_notas-arquitetura-desafio-amplo-parte2.md`).
+Este documento descreve, em blocos, a curadoria taxonômica determinística da tabela de ASVs do projeto **desafio_Amplo**. Nenhuma etapa aqui depende de interpretação de um LLM — tudo é reproduzível a partir de parâmetros declarados em configuração (YAML), com os defaults documentados ao longo deste documento, seção a seção.
 
 **Uso via linha de comando:**
 
