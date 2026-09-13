@@ -50,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--traditional-species",
+        "--reference",
         dest="traditional_species_csv",
         default=None,
         help=(

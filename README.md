@@ -50,7 +50,7 @@ Rscript r/install_packages.R
 ## Modo de execução
 
 ```bash
-python -m harness <entrada.csv> [--config config.yaml] [--output saida.csv] [--llm-mode live|mock|off] [--traditional-species spp_tradicional.csv]
+python -m harness <entrada.csv> [--config config.yaml] [--output saida.csv] [--llm-mode live|mock|off] [--reference spp_tradicional.csv]
 ```
 
 - `<entrada.csv>`: obrigatório. Schema em
@@ -62,10 +62,10 @@ python -m harness <entrada.csv> [--config config.yaml] [--output saida.csv] [--l
 - `--llm-mode`: `live` (default; usa a chave em `.env`, pula sozinho se não houver chave),
   `mock` (simula a resposta, sem rede — útil pra inspecionar o mecanismo sem gastar cota) ou
   `off` (pula por completo).
-- `--traditional-species`: CSV opcional (`;`-delimitado, UTF-8, colunas `Ponto` e
-  `Taxon_binomial`) com espécies já registradas por métodos tradicionais de monitoramento
-  (captura física) nos mesmos pontos amostrais — usado como evidência adicional na curadoria
-  assistida por LLM (ver [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md)). Exemplo em
+- `--reference`: CSV opcional (`;`-delimitado, UTF-8, colunas `Ponto` e `Taxon_binomial`) com
+  espécies já registradas por métodos tradicionais de monitoramento (captura física) nos
+  mesmos pontos amostrais — usado como evidência adicional na curadoria assistida por LLM (ver
+  [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md)). Exemplo em
   [`data/example/spp_tradicional.csv`](data/example/spp_tradicional.csv). Sem essa flag, a
   curadoria assistida roda normalmente, só sem essa evidência extra.
 
@@ -92,9 +92,9 @@ contrato de entrada em [`data/reference/asv_input_schema.yaml`](data/reference/a
 pytest tests/ -v
 ```
 
-24 testes, de `tools/schema_validation.py`, `harness/orchestrator.py` e
-`harness/llm_curation.py` — todos usam duplos falsos (R falso, chamada de LLM
-falsa/mockada) e nunca dependem de R instalado, rede ou uma chave de API real.
+Cobre `tools/schema_validation.py`, `harness/orchestrator.py` e `harness/llm_curation.py` —
+todos usam duplos falsos (R falso, chamada de LLM falsa/mockada) e nunca dependem de R
+instalado, rede ou uma chave de API real.
 
 ## Nota de segurança sobre a chave em `.env`
 
