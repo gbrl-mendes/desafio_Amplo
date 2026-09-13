@@ -39,6 +39,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_RUNS_DIR),
         help="Pasta onde gravar o log JSON de cada run (default: runs/).",
     )
+    parser.add_argument(
+        "--llm-mode",
+        choices=["live", "mock", "off"],
+        default="live",
+        help=(
+            "Curadoria assistida por LLM apos a determinística: 'live' (default; chama a Groq, "
+            "degrada sozinho pra 'off' se GROQ_API_KEY nao estiver configurada), 'mock' (simula "
+            "a resposta, sem rede, so testa o encadeamento) ou 'off' (pula por completo)."
+        ),
+    )
     return parser
 
 
@@ -50,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
         config_path=args.config_path,
         output_csv=args.output_csv,
         runs_dir=args.runs_dir,
+        llm_mode=args.llm_mode,
     )
 
     print(f"Status: {result.status}")
@@ -76,6 +87,19 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     print(f"\nSucesso. Saida em: {result.output_path}")
+
+    if result.llm_mode == "off" and result.llm_skipped_reason:
+        print(f"Curadoria assistida por LLM pulada: {result.llm_skipped_reason}")
+    elif result.llm_mode in ("live", "mock"):
+        print(
+            f"Curadoria assistida por LLM ({result.llm_mode}): "
+            f"{result.llm_reviewed_count}/{result.llm_total_unique_asvs} ASVs revisadas."
+        )
+        if result.llm_errors:
+            print(f"  {len(result.llm_errors)} erro(s) durante a revisao:")
+            for err in result.llm_errors[:5]:
+                print(f"    - {err}")
+
     return 0
 
 

@@ -4,15 +4,17 @@ falha) para rastreabilidade.
 
 Divisao de responsabilidades (nenhuma logica de curadoria mora aqui):
   - tools/schema_validation.py    valida o contrato de entrada (Python).
-  - r/curadoria_deterministica.R  toda a logica de curadoria (R, chamado
+  - r/curadoria_deterministica.R  toda a logica determinística (R, chamado
                                    como subprocesso).
-  - harness/orchestrator.py       conecta os dois, verifica a saida e
-                                   grava um log estruturado de cada run.
+  - harness/llm_curation.py       curadoria assistida por LLM (etapa
+                                   opcional, so pra ASVs inconclusivas).
+  - harness/orchestrator.py       conecta tudo, verifica a saida e grava
+                                   um log estruturado de cada run.
 
 Fluxo: valida -> (recusa se bloqueante) -> roda o R -> verifica a saida ->
-loga. Cada etapa gera um "RunResult" serializavel, gravado em
-`runs/<timestamp>.json`, para responder depois "o que foi feito e por
-que" sem precisar reexecutar nada.
+curadoria assistida por LLM (opcional) -> loga. Cada etapa gera um
+"RunResult" serializavel, gravado em `runs/<timestamp>.json`, para
+responder depois "o que foi feito e por que" sem precisar reexecutar nada.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from typing import Callable, Optional
 
 import pandas as pd
 
+from harness.llm_curation import LlmCurationResult, run_llm_assisted_curation
 from tools.schema_validation import load_schema, validate_asv_table
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -61,6 +64,11 @@ class RunResult:
     r_stderr_tail: str = ""
     verification_issues: list[str] = field(default_factory=list)
     error: Optional[str] = None
+    llm_mode: Optional[str] = None
+    llm_reviewed_count: int = 0
+    llm_total_unique_asvs: int = 0
+    llm_errors: list[str] = field(default_factory=list)
+    llm_skipped_reason: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -161,12 +169,19 @@ def run(
     r_runner: RScriptRunner = default_r_runner,
     rscript_exe: Optional[str] = None,
     timeout: int = 1800,
+    llm_mode: str = "live",
 ) -> RunResult:
-    """Executa uma rodada completa: valida -> roda o R -> verifica -> loga.
+    """Executa uma rodada completa: valida -> roda o R -> verifica ->
+    curadoria assistida por LLM (opcional) -> loga.
 
     `r_runner` e injetavel de proposito -- os testes passam um runner falso
     pra nao depender de R instalado nem de rede (NCBI/GBIF) pra verificar a
     logica de orquestracao em si.
+
+    `llm_mode`: "live" (default, chama a Groq -- degrada pra "off" sozinho
+    se GROQ_API_KEY nao estiver configurada), "mock" (simula a resposta,
+    sem rede -- so testa o encadeamento) ou "off" (pula a etapa por
+    completo, so entrega a curadoria deterministica).
     """
     input_csv = Path(input_csv)
     config_path = Path(config_path) if config_path else None
@@ -236,6 +251,19 @@ def run(
 
     status = "success" if proc.returncode == 0 and not verification_issues else "failed"
 
+    llm_result = None
+    if status == "success":
+        try:
+            curated_df = pd.read_csv(output_csv, sep=";", decimal=",", encoding="utf-8")
+            curated_df, llm_result = run_llm_assisted_curation(curated_df, mode=llm_mode)
+            curated_df.to_csv(output_csv, sep=";", decimal=",", index=False, encoding="utf-8")
+        except Exception as exc:
+            # A curadoria deterministica ja passou na verificacao acima --
+            # uma falha inesperada na etapa de LLM (ex. coluna de evidencia
+            # ausente por algum motivo imprevisto) nao deve derrubar um
+            # resultado ja validado, so ficar registrada.
+            llm_result = LlmCurationResult(mode="off", skipped_reason=f"Falha inesperada na curadoria assistida: {exc}")
+
     result = RunResult(
         status=status,
         input_path=str(input_csv),
@@ -248,6 +276,11 @@ def run(
         r_stdout_tail=_tail(proc.stdout),
         r_stderr_tail=_tail(proc.stderr),
         verification_issues=verification_issues,
+        llm_mode=llm_result.mode if llm_result else None,
+        llm_reviewed_count=llm_result.reviewed_count if llm_result else 0,
+        llm_total_unique_asvs=llm_result.total_unique_asvs if llm_result else 0,
+        llm_errors=llm_result.errors if llm_result else [],
+        llm_skipped_reason=llm_result.skipped_reason if llm_result else None,
     )
     write_run_log(result, runs_dir)
     return result

@@ -88,6 +88,7 @@ def test_success_when_valid_input_and_r_succeeds(tmp_path):
         runs_dir=tmp_path / "runs",
         r_runner=_fake_success_runner,
         rscript_exe="rscript-fake",
+        llm_mode="off",  # etapa de LLM tem seus proprios testes em test_llm_curation.py
     )
 
     assert result.status == "success"
