@@ -30,7 +30,7 @@ from typing import Callable, Optional
 
 import pandas as pd
 
-from harness.llm_curation import LlmCurationResult, run_llm_assisted_curation
+from harness.llm_curation import LlmCurationResult, load_traditional_species, run_llm_assisted_curation
 from tools.schema_validation import load_schema, validate_asv_table
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -170,6 +170,7 @@ def run(
     rscript_exe: Optional[str] = None,
     timeout: int = 1800,
     llm_mode: str = "live",
+    traditional_species_csv: str | Path | None = None,
 ) -> RunResult:
     """Executa uma rodada completa: valida -> roda o R -> verifica ->
     curadoria assistida por LLM (opcional) -> loga.
@@ -182,6 +183,12 @@ def run(
     se GROQ_API_KEY nao estiver configurada), "mock" (simula a resposta,
     sem rede -- so testa o encadeamento) ou "off" (pula a etapa por
     completo, so entrega a curadoria deterministica).
+
+    `traditional_species_csv`: caminho opcional para a tabela de especies
+    obtidas por metodos tradicionais de monitoramento (ver
+    `harness.llm_curation.load_traditional_species`), usada so como
+    evidencia adicional na curadoria assistida por LLM. Sem ela, essa
+    etapa roda normalmente, so sem essa evidencia extra.
     """
     input_csv = Path(input_csv)
     config_path = Path(config_path) if config_path else None
@@ -254,8 +261,15 @@ def run(
     llm_result = None
     if status == "success":
         try:
+            traditional_species_df = (
+                load_traditional_species(traditional_species_csv)
+                if traditional_species_csv is not None
+                else None
+            )
             curated_df = pd.read_csv(output_csv, sep=";", decimal=",", encoding="utf-8")
-            curated_df, llm_result = run_llm_assisted_curation(curated_df, mode=llm_mode)
+            curated_df, llm_result = run_llm_assisted_curation(
+                curated_df, mode=llm_mode, traditional_species_df=traditional_species_df
+            )
             curated_df.to_csv(output_csv, sep=";", decimal=",", index=False, encoding="utf-8")
         except Exception as exc:
             # A curadoria deterministica ja passou na verificacao acima --

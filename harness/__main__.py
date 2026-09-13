@@ -49,6 +49,16 @@ def build_parser() -> argparse.ArgumentParser:
             "a resposta, sem rede, so testa o encadeamento) ou 'off' (pula por completo)."
         ),
     )
+    parser.add_argument(
+        "--traditional-species",
+        dest="traditional_species_csv",
+        default=None,
+        help=(
+            "CSV opcional (;-delimitado, UTF-8) com especies obtidas por metodos tradicionais "
+            "de monitoramento (colunas Ponto e Taxon_binomial) -- usado como evidencia extra na "
+            "curadoria assistida por LLM. Ver data/example/spp_tradicional.csv."
+        ),
+    )
     return parser
 
 
@@ -61,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         output_csv=args.output_csv,
         runs_dir=args.runs_dir,
         llm_mode=args.llm_mode,
+        traditional_species_csv=args.traditional_species_csv,
     )
 
     print(f"Status: {result.status}")

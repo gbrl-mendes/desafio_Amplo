@@ -87,6 +87,12 @@ identificador de ASV -- consulte a identificação de cada vizinho na mesma tabe
 - Detectada em {n_samples} amostra(s) reais; marcada como possível contaminação (Fold Change \
 baixo vs. controle) em {n_contam} dessas
 - Ponto(s) amostral(is): {pontos} | Habitat(s): {habitats} | Rio(s): {rios}
+- Espécies já registradas por métodos tradicionais de captura (coleta física, não eDNA) nesse(s) \
+mesmo(s) ponto(s) amostral(is), quando essa comparação está disponível: {traditional_evidence}. \
+Trate isso como evidência A FAVOR quando houver correspondência, NUNCA como lista fechada: a \
+ausência de uma espécie nessa lista não é evidência de que ela esteja ausente do ponto, e um \
+ponto sem nenhuma cobertura tradicional simplesmente não tem dado de comparação (não trate como \
+ausência).
 
 TAREFA: Responda em português, em JSON estrito, sem nenhum texto fora do JSON, com exatamente estas chaves:
 {{
@@ -169,7 +175,41 @@ def build_asv_evidence(df: pd.DataFrame) -> pd.DataFrame:
     return grouped
 
 
-def build_prompt(evidence_row: pd.Series) -> str:
+def load_traditional_species(path: str | Path) -> pd.DataFrame:
+    """Le a tabela opcional de especies obtidas por metodos tradicionais de
+    monitoramento (captura fisica), no mesmo padrao de CSV do projeto
+    (`;`-delimitado, UTF-8). Exige `Ponto` e `Taxon_binomial` -- as duas
+    colunas usadas para cruzar com a evidencia de cada ASV."""
+    df = pd.read_csv(path, sep=";", encoding="utf-8")
+    required = {"Ponto", "Taxon_binomial"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Tabela de especies tradicionais sem coluna(s) obrigatoria(s): {sorted(missing)}")
+    return df
+
+
+def build_traditional_evidence_text(pontos: list[str], traditional_df: Optional[pd.DataFrame]) -> str:
+    """Monta o texto de evidencia de captura tradicional por ponto amostral
+    da ASV, distinguindo "ponto sem nenhuma especie batendo" de "ponto sem
+    cobertura tradicional nenhuma" -- a segunda situacao nao pode virar
+    evidencia de ausencia (ver DOMINIO_E_CONTRATO.md)."""
+    if traditional_df is None:
+        return "não disponível (nenhuma tabela de espécies tradicionais fornecida para esta execução)"
+    if not pontos:
+        return "não disponível (ASV sem ponto amostral associado)"
+
+    covered_pontos = set(traditional_df["Ponto"].unique())
+    parts = []
+    for ponto in pontos:
+        if ponto not in covered_pontos:
+            parts.append(f"{ponto}: sem cobertura tradicional (sem dado de comparação)")
+            continue
+        species = sorted(traditional_df.loc[traditional_df["Ponto"] == ponto, "Taxon_binomial"].unique())
+        parts.append(f"{ponto}: {', '.join(species)}")
+    return " | ".join(parts)
+
+
+def build_prompt(evidence_row: pd.Series, traditional_df: Optional[pd.DataFrame] = None) -> str:
     return PROMPT_TEMPLATE.format(
         blast_id=evidence_row["BLAST ID"],
         identification=evidence_row["Identification"],
@@ -187,6 +227,7 @@ def build_prompt(evidence_row: pd.Series) -> str:
         pontos=", ".join(evidence_row["pontos"]) or "desconhecido",
         habitats=", ".join(evidence_row["habitats"]) or "desconhecido",
         rios=", ".join(evidence_row["rios"]) or "desconhecido",
+        traditional_evidence=build_traditional_evidence_text(evidence_row["pontos"], traditional_df),
     )
 
 
@@ -261,6 +302,7 @@ def run_llm_assisted_curation(
     model: Optional[str] = None,
     caller: Optional[LlmCaller] = None,
     verbose: bool = True,
+    traditional_species_df: Optional[pd.DataFrame] = None,
 ) -> tuple[pd.DataFrame, LlmCurationResult]:
     """Executa a curadoria assistida e devolve o dataframe com as 3 colunas
     novas (propagadas pra todas as linhas de cada ASV) + um relatorio do
@@ -269,6 +311,12 @@ def run_llm_assisted_curation(
     `caller` e injetavel de proposito (assim como `r_runner` no
     orchestrator) -- os testes passam um caller falso pra nao depender de
     rede nem de uma chave de API real.
+
+    `traditional_species_df` e opcional: a tabela de especies obtidas por
+    metodos tradicionais de monitoramento (ver `load_traditional_species`),
+    usada so como evidencia adicional no prompt de cada ASV revisada. Sem
+    ela, o prompt segue normalmente, so declarando essa evidencia como
+    indisponivel.
     """
     df = df.copy()
     for col in ASSISTED_COLUMNS:
@@ -311,7 +359,7 @@ def run_llm_assisted_curation(
 
     assisted_rows = []
     for _, evidence_row in to_review.iterrows():
-        prompt = build_prompt(evidence_row)
+        prompt = build_prompt(evidence_row, traditional_df=traditional_species_df)
         try:
             if mode == "mock":
                 response = mock_llm_response(evidence_row)

@@ -13,6 +13,7 @@ import pytest
 from harness.llm_curation import (
     ASSISTED_COLUMNS,
     build_asv_evidence,
+    build_traditional_evidence_text,
     needs_review,
     run_llm_assisted_curation,
 )
@@ -175,3 +176,57 @@ def test_run_llm_assisted_curation_mock_mode_needs_no_key():
     assert result.mode == "mock"
     assert result.reviewed_count == 1
     assert result_df["Assisted Justification (LLM)"].iloc[0].startswith("[mock]")
+
+
+def test_build_traditional_evidence_text_without_table():
+    assert "não disponível" in build_traditional_evidence_text(["SC1"], None)
+
+
+def test_build_traditional_evidence_text_marks_uncovered_point_as_no_comparison_data():
+    traditional_df = pd.DataFrame(
+        [{"Ponto": "SC1", "Taxon_binomial": "Astyanax lacustris"}]
+    )
+
+    text = build_traditional_evidence_text(["SC1", "SC5"], traditional_df)
+
+    assert "SC1: Astyanax lacustris" in text
+    assert "SC5: sem cobertura tradicional (sem dado de comparação)" in text
+
+
+def test_build_traditional_evidence_text_lists_species_for_covered_point():
+    traditional_df = pd.DataFrame(
+        [
+            {"Ponto": "SC1", "Taxon_binomial": "Astyanax lacustris"},
+            {"Ponto": "SC1", "Taxon_binomial": "Brycon nattereri"},
+        ]
+    )
+
+    text = build_traditional_evidence_text(["SC1"], traditional_df)
+
+    assert text == "SC1: Astyanax lacustris, Brycon nattereri"
+
+
+def test_run_llm_assisted_curation_passes_traditional_evidence_into_prompt():
+    df = _make_df([_base_row(**{"Identification Max. taxonomy": "Genus"})])
+    traditional_df = pd.DataFrame(
+        [{"Ponto": "SC1", "Taxon_binomial": "Astyanax lacustris"}]
+    )
+    captured_prompt = {}
+
+    def fake_caller(prompt: str, api_key: str, model: str) -> dict:
+        captured_prompt["prompt"] = prompt
+        return {
+            "assisted_id": "Astyanax lacustris",
+            "assisted_confidence": "Alta",
+            "assisted_justification": "Bate com registro tradicional no mesmo ponto.",
+        }
+
+    run_llm_assisted_curation(
+        df,
+        mode="live",
+        api_key="fake-key",
+        caller=fake_caller,
+        traditional_species_df=traditional_df,
+    )
+
+    assert "SC1: Astyanax lacustris" in captured_prompt["prompt"]

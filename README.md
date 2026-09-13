@@ -50,7 +50,7 @@ Rscript r/install_packages.R
 ## Modo de execução
 
 ```bash
-python -m harness <entrada.csv> [--config config.yaml] [--output saida.csv] [--llm-mode live|mock|off]
+python -m harness <entrada.csv> [--config config.yaml] [--output saida.csv] [--llm-mode live|mock|off] [--traditional-species spp_tradicional.csv]
 ```
 
 - `<entrada.csv>`: obrigatório. Schema em
@@ -62,6 +62,12 @@ python -m harness <entrada.csv> [--config config.yaml] [--output saida.csv] [--l
 - `--llm-mode`: `live` (default; usa a chave em `.env`, pula sozinho se não houver chave),
   `mock` (simula a resposta, sem rede — útil pra inspecionar o mecanismo sem gastar cota) ou
   `off` (pula por completo).
+- `--traditional-species`: CSV opcional (`;`-delimitado, UTF-8, colunas `Ponto` e
+  `Taxon_binomial`) com espécies já registradas por métodos tradicionais de monitoramento
+  (captura física) nos mesmos pontos amostrais — usado como evidência adicional na curadoria
+  assistida por LLM (ver [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md)). Exemplo em
+  [`data/example/spp_tradicional.csv`](data/example/spp_tradicional.csv). Sem essa flag, a
+  curadoria assistida roda normalmente, só sem essa evidência extra.
 
 Código de saída: `0` sucesso, `2` entrada recusada pela validação, `3` falha de execução.
 
