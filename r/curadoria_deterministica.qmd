@@ -1,0 +1,1097 @@
+---
+title: "Curadoria Taxonômica Determinística desafio_Amplo"
+author: "Gabriel Mendes"
+format: html
+editor: visual
+editor_options:
+  chunk_output_type: console
+chunk_output_type: console
+---
+
+# Curadoria Determinística de ASVs
+
+Este documento descreve, em blocos, a curadoria taxonômica determinística da tabela de ASVs do projeto **desafio_Amplo**. Nenhuma etapa aqui depende de interpretação de um LLM — tudo é reproduzível a partir de parâmetros declarados em configuração (YAML), com os defaults documentados ao longo deste documento e detalhados nas notas de arquitetura (`claude_notas-arquitetura-desafio-amplo-parte2.md`).
+
+**Uso via linha de comando:**
+
+```{bash}
+Rscript curadoria_deterministica.R <entrada.csv> [--config=config.yaml] [--output=saida.csv]
+```
+
+**Uso interativo (RStudio/Positron):** abra o `.R` equivalente e rode `source()` (ou execute por seções com Ctrl+Enter) — o `if (!interactive())` no fim impede que `main()` rode sozinho, então as funções deste documento ficam disponíveis para chamar uma a uma e inspecionar o resultado no Data Explorer.
+
+Os blocos estão organizados assim:
+
+1.  Setup / parsing
+2.  Refinamento de hits BLAST + limpeza de nome
+3.  Taxonomia NCBI + contaminação
+4.  Curadoria final (faixa de amplicon / pseudo-score / táxons-alvo)
+5.  Árvore filogenética + extração de vizinhos
+6.  Checagem regional GBIF + exportação
+
+## 1. Setup & Configuração
+
+### Pacotes
+
+- **Carregar bibliotecas.** Importa todos os pacotes necessários para manipulação de dados, consulta taxonômica, árvore filogenética e checagem geográfica de ocorrência.
+
+  ```{r}
+  # Garante que a biblioteca pessoal do usuario entra em .libPaths() mesmo
+  # quando o script e chamado como subprocesso (ex. pelo harness em Python via
+  # subprocess.run) -- um subprocesso nao herda necessariamente o mesmo
+  # ambiente de uma sessao interativa de terminal/RStudio, entao nao da pra
+  # depender de R_LIBS_USER ja estar exportado por quem chama.
+  user_lib <- Sys.getenv("R_LIBS_USER")
+  if (nzchar(user_lib) && dir.exists(user_lib) && !(user_lib %in% .libPaths())) {
+    .libPaths(c(user_lib, .libPaths()))
+  }
+
+  library(tidyverse)
+  library(yaml)
+  library(taxize)
+  library(DECIPHER)
+  library(ape)
+  library(rgbif)
+  ```
+
+### Localização do repositório
+
+- **Resolver a raiz do repo.** Funciona tanto rodando via `Rscript` quanto de dentro do RStudio/Positron (onde não há `--file=` em `commandArgs`).
+
+  ```{r}
+  get_repo_root <- function() {
+    cli_args <- commandArgs(trailingOnly = FALSE)
+    file_arg <- grep("^--file=", cli_args, value = TRUE)
+    if (length(file_arg) > 0) {
+      script_path <- normalizePath(sub("^--file=", "", file_arg[1]))
+      return(dirname(dirname(script_path)))
+    }
+    if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable()) {
+      ctx_path <- tryCatch(rstudioapi::getSourceEditorContext()$path, error = function(e) "")
+      if (nzchar(ctx_path)) return(dirname(dirname(normalizePath(ctx_path))))
+    }
+    getwd()
+  }
+
+  REPO_ROOT <- get_repo_root()
+  SCHEMA_PATH <- file.path(REPO_ROOT, "data", "reference", "asv_input_schema.yaml")
+  ```
+
+### Configuração
+
+A lista abaixo reúne os parâmetros configuráveis do pipeline, com valores default para o projeto atual. Qualquer override deve vir de `--config`, nunca editado direto aqui.
+
+- **Defaults de configuração.**
+
+  ```{r}
+  DEFAULT_CONFIG <- list(
+    metadados = list(
+      # Mapeia o nome bruto de cada coluna de metadado (como chega no CSV)
+      # para o nome semantico esperado pelo resto do pipeline. Colunas de
+      # latitude e longitude devem ser mapeadas exatamente para
+      # "Latitude"/"Longitude": e nessas colunas que a correcao de escala
+      # (grau decimal codificado como inteiro, dividido por 1e6) e aplicada.
+      colunas = c(
+        "Metadata 1" = "Ponto",
+        "Metadata 8" = "Latitude",
+        "Metadata 9" = "Longitude",
+        "Metadata 10" = "Habitat",
+        "Metadata 11" = "Rios"
+      )
+    ),
+    contaminacao = list(
+      fold_change_threshold = 10
+    ),
+    amplicon_por_primer = list(
+      MiFish2 = c(140, 200)
+    ),
+    identificacao = list(
+      pseudoscore_thresholds = list(
+        especie = 98, genero = 95, familia = 90, ordem = 80, classe = 60
+      )
+    ),
+    arvore_filogenetica = list(
+      k_vizinhos = 5
+    ),
+    taxons_alvo = list(
+      # Nomes de grupos definidos no registro interno de taxons-alvo (bloco
+      # 4). Um projeto multi-primer pode combinar mais de um grupo, ex.
+      # c("Metazoa", "Periphyton").
+      grupos = c("Metazoa")
+    ),
+    checagem_regional = list(
+      fonte = "gbif",
+      # Area aproximada do PARNA/APA Serra do Cipo, usada como default deste
+      # projeto -- ajuste para a area de estudo real via --config.
+      area_bbox = list(lat_min = -19.6, lat_max = -19.1, long_min = -43.8, long_max = -43.3)
+    )
+  )
+  ```
+
+- **Função de carregamento.** Junta os defaults com um YAML de usuário (merge recursivo via `modifyList`; só sobrescreve as chaves que o YAML de fato traz).
+
+  ```{r}
+  load_config <- function(config_path = NULL, defaults = DEFAULT_CONFIG) {
+    if (is.null(config_path)) return(defaults)
+    if (!file.exists(config_path)) {
+      stop(sprintf("Arquivo de config '%s' nao encontrado.", config_path), call. = FALSE)
+    }
+    user_config <- yaml::read_yaml(config_path)
+    utils::modifyList(defaults, user_config, keep.null = TRUE)
+  }
+  ```
+
+### Leitura e checagem de sanidade
+
+A validação completa (colunas obrigatórias, vazamento, chave primária) é responsabilidade do harness em Python (`tools/schema_validation.py`), rodada **antes** de chamar este script. As funções abaixo são só uma guarda leve para quando o script roda sozinho (RStudio/Positron) sem passar pelo harness.
+
+- **Ler o contrato de schema.** Usa o mesmo YAML que o validador em Python, para não duplicar a lista de colunas obrigatórias em duas linguagens.
+
+  ```{r}
+  read_schema <- function(schema_path = SCHEMA_PATH) {
+    yaml::read_yaml(schema_path)
+  }
+  ```
+
+- **Checar colunas obrigatórias.** Interrompe a execução se alguma coluna de entrada obrigatória estiver ausente.
+
+  ```{r}
+  check_required_columns <- function(df, schema) {
+    required <- purrr::keep(schema$columns, function(col) {
+      identical(col$role, "input") && isTRUE(col$required)
+    })
+    required_names <- purrr::map_chr(required, "name")
+    missing <- setdiff(required_names, colnames(df))
+    if (length(missing) > 0) {
+      stop(
+        paste0(
+          "Tabela de entrada nao passa no contrato de schema -- ",
+          length(missing), " coluna(s) obrigatoria(s) ausente(s):\n  - ",
+          paste(missing, collapse = "\n  - "),
+          "\n(Isto e so uma guarda de sanidade para uso standalone do script;",
+          " a validacao completa fica em tools/schema_validation.py.)"
+        ),
+        call. = FALSE
+      )
+    }
+    invisible(TRUE)
+  }
+  ```
+
+- **Ler o CSV bruto do BLASTr.** Delimitador `;`, decimal `,` (inclusive em notação científica no e-value, ex. `"1,92e-80"`), UTF-8, aspas padrão CSV para campos com `;`/quebra de linha interna (ex. controles múltiplos).
+
+  ```{r}
+  read_asv_table <- function(path) {
+    readr::read_delim(
+      path,
+      delim = ";",
+      locale = readr::locale(decimal_mark = ",", encoding = "UTF-8"),
+      quote = "\"",
+      show_col_types = FALSE,
+      progress = FALSE
+    )
+  }
+  ```
+
+## 2. Bloco 1 — Setup & Parsing
+
+### Parsing de metadados
+
+- **Renomear colunas de metadados.** Renomeia as colunas brutas de metadado para os nomes semânticos esperados pelo pipeline, de acordo com o mapeamento declarado em `config$metadados$colunas`, e corrige `Latitude`/`Longitude`, que costumam vir como inteiro (ex. `-19420314`) em vez de grau decimal — dividir por `1e6` dá o valor real (`-19.420314`). Sem essa correção qualquer consulta geográfica (GBIF, bloco 6) quebra silenciosamente. Colunas ausentes no mapeamento são puladas com aviso em vez de erro.
+
+  ```{r}
+  rename_metadata_columns <- function(df, colunas) {
+    rename_map <- colunas
+
+    present <- rename_map[names(rename_map) %in% colnames(df)]
+    absent <- rename_map[!names(rename_map) %in% colnames(df)]
+    if (length(absent) > 0) {
+      warning(sprintf(
+        "Coluna(s) de metadado ausente(s), renomeacao pulada: %s",
+        paste(names(absent), collapse = ", ")
+      ), call. = FALSE)
+    }
+
+    df <- dplyr::rename(df, !!!setNames(names(present), present))
+
+    if ("Latitude" %in% colnames(df)) {
+      df$Latitude <- as.numeric(df$Latitude) / 1e6
+    }
+    if ("Longitude" %in% colnames(df)) {
+      df$Longitude <- as.numeric(df$Longitude) / 1e6
+    }
+    df
+  }
+  ```
+
+### Colunas calculadas localmente
+
+Estas colunas não vêm no CSV bruto (só existiam na planilha mestre, calculadas historicamente por um processo externo ao pipeline) — são recalculadas aqui sempre, nunca aceitas vindas do input (ver `role: derived_local` no contrato de schema).
+
+- **Tamanho do amplicon.** `ASV Size (pb)` = número de bases da sequência da ASV. Piso de entrada para o filtro de `amplicon_por_primer` (bloco 4) e para a árvore filogenética (bloco 5).
+
+  ```{r}
+  add_asv_size <- function(df) {
+    dplyr::mutate(df, `ASV Size (pb)` = nchar(`ASV (Sequence)`))
+  }
+  ```
+
+- **Abundância total da amostra.** `Sample total abundance` = soma de `ASV absolute abundance` de todas as ASVs daquela amostra (mesma amostra repete o mesmo total em cada linha, igual à planilha mestre original).
+
+  ```{r}
+  add_sample_total_abundance <- function(df) {
+    dplyr::group_by(df, Sample) %>%
+      dplyr::mutate(`Sample total abundance` = sum(`ASV absolute abundance`, na.rm = TRUE)) %>%
+      dplyr::ungroup()
+  }
+  ```
+
+- **Header da ASV.** Formato `">ASV_{posicao}-{tamanho}bp"` (ex. `">ASV_2422-168bp"`). Posição = rank da ASV entre as sequências **únicas** da tabela (a tabela é long-format: a mesma ASV aparece em várias amostras, mas o rank é por sequência, não por linha), ordenado por tamanho decrescente; empate de tamanho desempatado pela abundância total da ASV (soma de `ASV absolute abundance` de todas as amostras onde ela aparece).
+
+  ```{r}
+  add_asv_header <- function(df) {
+    unique_asvs <- df %>%
+      dplyr::group_by(`ASV (Sequence)`) %>%
+      dplyr::summarise(
+        .size = nchar(dplyr::first(`ASV (Sequence)`)),
+        .total_abundance = sum(`ASV absolute abundance`, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      dplyr::arrange(dplyr::desc(.size), dplyr::desc(.total_abundance)) %>%
+      dplyr::mutate(.rank = dplyr::row_number())
+
+    df %>%
+      dplyr::left_join(
+        dplyr::select(unique_asvs, `ASV (Sequence)`, .rank),
+        by = "ASV (Sequence)"
+      ) %>%
+      dplyr::mutate(`ASV header` = sprintf(">ASV_%d-%dbp", .rank, `ASV Size (pb)`)) %>%
+      dplyr::select(-.rank)
+  }
+  ```
+
+- **Encadear as colunas derivadas.** Aplica as três funções acima em sequência.
+
+  ```{r}
+  compute_derived_local_columns <- function(df) {
+    df %>%
+      add_asv_size() %>%
+      add_sample_total_abundance() %>%
+      add_asv_header()
+  }
+  ```
+
+### Executar o bloco 1
+
+- **Setup + parsing.** Lê o CSV bruto, confere colunas obrigatórias, corrige metadados geográficos e calcula as 3 colunas derivadas localmente.
+
+  ```{r}
+  run_setup_parsing <- function(input_path, config = DEFAULT_CONFIG, schema = read_schema()) {
+    df <- read_asv_table(input_path)
+    check_required_columns(df, schema)
+
+    df <- df %>%
+      rename_metadata_columns(config$metadados$colunas) %>%
+      compute_derived_local_columns()
+
+    df
+  }
+  ```
+
+## 3. Bloco 2 — Refinamento de Hits BLAST + Limpeza de Nome
+
+Este bloco reaproveita a lógica de higienização de hits do `roots_metabar_metabarcoding-pipeline.qmd` (seções "Refine BLAST Hits" e "Clean Species Names"), preservando os mesmos padrões e regras de limpeza de nome; apenas os nomes de coluna de saída foram alinhados ao contrato de schema deste repositório (`BLAST ID`, não `blast ID`).
+
+- **Padrões de resultado ruim.** Lista de headers "não-informativos" do BLAST (ex. "Uncultured bacterium") que não devem ser aceitos como identificação. Não escapar os parênteses do último padrão é intencional — na fonte original eles também não são escapados (viram um grupo de regex, não um parêntese literal exigido no texto), então mantido idêntico para reproduzir o mesmo comportamento de match.
+
+  ```{r}
+  BAD_RES_PATTERNS <- paste0(c(
+    "Uncultured", "uncultured", "Uncultured archaeon", "Uncultured organism",
+    "Uncultured bacterium", "Uncultured Candidatus", "Uncultured prokaryote",
+    "Eukaryotic synthetic construct", "16S rRNA amplicon fragment",
+    "Invertebrate environmental", "Complete Metagenome-Assembled",
+    "PREDICTED: Nomascus", "(Citrus unshiu x Citrus sinensis)"
+  ), collapse = "|")
+  ```
+
+- **Selecionar o melhor hit BLAST.** Escolhe o melhor hit entre os 3 primeiros do BLAST, pulando headers ruins. Se os 3 forem ruins (ou ausentes), marca como `"Match_not_reliable"` em vez de forçar uma identificação a partir de um hit inútil.
+
+  ```{r}
+  select_best_blast_hit <- function(df) {
+    df %>%
+      dplyr::mutate(
+        .is_bad_1 = stringr::str_detect(`1_subject header`, BAD_RES_PATTERNS),
+        .is_bad_2 = stringr::str_detect(`2_subject header`, BAD_RES_PATTERNS),
+        .is_bad_3 = stringr::str_detect(`3_subject header`, BAD_RES_PATTERNS),
+        Selected_Hit_Origin = dplyr::case_when(
+          !.is_bad_1 ~ "1",
+          .is_bad_1 & !is.na(`2_subject header`) & !.is_bad_2 ~ "2",
+          .is_bad_1 & .is_bad_2 & !is.na(`3_subject header`) & !.is_bad_3 ~ "3",
+          TRUE ~ "None"
+        ),
+        `BLAST ID` = dplyr::case_when(
+          Selected_Hit_Origin == "1" ~ substr(`1_subject header`, 1, 40),
+          Selected_Hit_Origin == "2" ~ substr(`2_subject header`, 1, 40),
+          Selected_Hit_Origin == "3" ~ substr(`3_subject header`, 1, 40),
+          TRUE ~ "Match_not_reliable"
+        ),
+        query_taxID = dplyr::case_when(
+          Selected_Hit_Origin == "1" ~ `1_staxid`,
+          Selected_Hit_Origin == "2" ~ `2_staxid`,
+          Selected_Hit_Origin == "3" ~ `3_staxid`,
+          TRUE ~ NA_real_
+        ),
+        # Segunda passada: pega "ncultur"/"nvironmental" que tenha escapado do
+        # primeiro filtro (ex. no meio do header, nao so no comeco).
+        `BLAST ID` = dplyr::if_else(
+          stringr::str_detect(`BLAST ID`, "ncultur|nvironmental"),
+          "Match_not_reliable", `BLAST ID`
+        )
+      ) %>%
+      dplyr::select(-.is_bad_1, -.is_bad_2, -.is_bad_3)
+  }
+  ```
+
+- **Limpar nomes de espécie.** Reduz o `BLAST ID` bruto à nomenclatura binomial (Gênero espécie), removendo ruído textual e tags de incerteza (`"cf."`, `"nr."`, `"MAG:"` etc.), e força casos especiais de contaminação humana para `"Homo sapiens"`.
+
+  ```{r}
+  clean_species_names <- function(df) {
+    df %>%
+      dplyr::mutate(`BLAST ID` = dplyr::case_when(
+        `BLAST ID` == "Match_not_reliable" ~ "Match_not_reliable",
+        TRUE ~ `BLAST ID` %>%
+          stringr::str_replace_all(c(
+            "Uncultured" = "", "uncultured" = "", "Candidatus" = "",
+            "MAG:" = "", "MAG TPA_asm:" = "", "TPA_asm:" = "",
+            "^Cf\\. " = "", "^cf\\. " = "", "candidate division" = "",
+            "\\[" = "", "\\]" = "", "'" = "", "," = "", "\\n" = ""
+          )) %>%
+          stringr::str_replace_all(c(" cf. " = " ", " nr. " = " ")) %>%
+          stringr::str_squish() %>%
+          stringr::word(1, 2, sep = stringr::fixed(" "))
+      )) %>%
+      dplyr::mutate(`BLAST ID` = dplyr::recode(`BLAST ID`,
+        "Human DNA" = "Homo sapiens",
+        "Human chromosome" = "Homo sapiens",
+        "Eukaryotic synthetic" = "Homo sapiens"
+      ))
+  }
+  ```
+
+- **Executar o bloco 2.** Encadeia a seleção do melhor hit e a limpeza de nome.
+
+  ```{r}
+  run_blast_refinement <- function(df) {
+    df %>%
+      select_best_blast_hit() %>%
+      clean_species_names()
+  }
+  ```
+
+## 4. Bloco 3 — Taxonomia NCBI + Contaminação
+
+A parte de **taxonomia** reaproveita a lógica de "Retrieve Complete Lineages" / "Fill Missing Taxonomic Ranks" do roots_metabar (seção 7), usando diretamente o taxid do hit BLAST já selecionado em vez de resolver gênero → taxid separadamente, já que `1/2/3_staxid` vêm prontos no CSV bruto. A parte de **contaminação** reaproveita a lógica da seção 10 (Fold Change vs. controles).
+
+### Taxonomia NCBI
+
+- **Ranks taxonômicos alvo.** Lista de colunas de rank que serão preenchidas a partir do NCBI.
+
+  ```{r}
+  TAXONOMY_RANKS <- c(
+    "Superkingdom (NCBI)", "Kingdom (NCBI)", "Phylum (NCBI)",
+    "Subphylum (NCBI)", "Class (NCBI)", "Subclass (NCBI)",
+    "Order (NCBI)", "Suborder (NCBI)", "Family (NCBI)",
+    "Subfamily (NCBI)", "Genus (NCBI)"
+  )
+  ```
+
+- **Consultar taxonomia no NCBI.** Consulta o NCBI (`taxize::classification`) para os taxids únicos de `query_taxID` e devolve uma linha por taxid, uma coluna por nível taxonômico. Correção em relação à fonte original: o rank retornado pelo taxize para Bacteria/Archaea/Eukaryota/Viruses se chama `"superkingdom"`, não `"subkingdom"` — usa-se aqui o nome correto devolvido pela API, em vez do fallback manual que a fonte original aplicava para compensar o nome errado.
+
+  ```{r}
+  retrieve_taxonomy <- function(taxids, entrez_key = NULL, batch_size = 50, verbose = TRUE) {
+    taxids <- unique(taxids[!is.na(taxids)])
+    rank_rename <- c(
+      superkingdom = "Superkingdom (NCBI)", kingdom = "Kingdom (NCBI)",
+      phylum = "Phylum (NCBI)", subphylum = "Subphylum (NCBI)",
+      class = "Class (NCBI)", subclass = "Subclass (NCBI)",
+      order = "Order (NCBI)", suborder = "Suborder (NCBI)",
+      family = "Family (NCBI)", subfamily = "Subfamily (NCBI)",
+      genus = "Genus (NCBI)", species = "Sci_name"
+    )
+
+    if (length(taxids) == 0) {
+      empty <- tibble::tibble(query_taxID = numeric(0))
+      for (col in unique(rank_rename)) empty[[col]] <- character(0)
+      return(empty)
+    }
+
+    if (!is.null(entrez_key) && nzchar(entrez_key)) {
+      Sys.setenv(ENTREZ_KEY = entrez_key)
+    }
+
+    if (verbose) message(sprintf("Consultando taxonomia de %d taxid(s) unico(s) no NCBI...", length(taxids)))
+
+    uid_batches <- split(taxids, ceiling(seq_along(taxids) / batch_size))
+    cls_list <- list()
+
+    for (i in seq_along(uid_batches)) {
+      if (verbose) message(sprintf("Lote %d de %d...", i, length(uid_batches)))
+      batch_res <- tryCatch(
+        taxize::classification(uid_batches[[i]], db = "ncbi", return_id = TRUE),
+        error = function(e) {
+          warning(sprintf("Falha no lote %d: %s", i, conditionMessage(e)), call. = FALSE)
+          NULL
+        }
+      )
+      if (!is.null(batch_res)) cls_list <- c(cls_list, batch_res)
+      Sys.sleep(if (!is.null(entrez_key) && nzchar(entrez_key)) 0.15 else 0.4)
+    }
+
+    tax_long <- purrr::imap_dfr(cls_list, function(cls_df, curr_uid) {
+      if (!is.data.frame(cls_df) || nrow(cls_df) == 0) {
+        return(tibble::tibble(query_taxID = as.numeric(curr_uid), rank = NA_character_, name = NA_character_))
+      }
+      cls_df %>%
+        dplyr::select(rank, name) %>%
+        dplyr::mutate(query_taxID = as.numeric(curr_uid))
+    })
+
+    # Ranks "ruido" que o taxize as vezes devolve e que sao descartados
+    # explicitamente por nao serem informativos.
+    noise_ranks <- c(
+      "cellular root", "clade", "domain", "no rank", "subtribe", "forma",
+      "subspecies", "subgenus", "section", "varietas", "genotype", "NA"
+    )
+
+    wide_tax <- tax_long %>%
+      dplyr::filter(!is.na(rank), !rank %in% noise_ranks) %>%
+      dplyr::distinct(query_taxID, rank, .keep_all = TRUE) %>%
+      tidyr::pivot_wider(id_cols = query_taxID, names_from = rank, values_from = name, values_fill = NA_character_)
+
+    present_renames <- rank_rename[names(rank_rename) %in% colnames(wide_tax)]
+    if (length(present_renames) > 0) {
+      wide_tax <- dplyr::rename(wide_tax, !!!setNames(names(present_renames), present_renames))
+    }
+
+    for (col in setdiff(unique(rank_rename), colnames(wide_tax))) wide_tax[[col]] <- NA_character_
+
+    if (verbose) message("Taxonomia recuperada.")
+    wide_tax
+  }
+  ```
+
+- **Preencher ranks faltantes.** Propaga taxonomia faltante "de cima pra baixo": `Superkingdom` preenchido por regras a partir de `Kingdom`/`Phylum` quando o NCBI não devolveu esse nível; ranks intermediários viram `"{rank} of {rank superior}"` quando ausentes, pra não deixar buraco na hierarquia (em vez de `NA`, que quebraria agrupamentos downstream).
+
+  ```{r}
+  fill_missing_ranks <- function(taxonomy_tbl) {
+    taxonomy_tbl <- taxonomy_tbl %>%
+      dplyr::mutate(
+        `Genus (NCBI)` = dplyr::case_when(
+          is.na(`Genus (NCBI)`) & !is.na(Sci_name) ~ stringr::word(Sci_name, 1),
+          TRUE ~ `Genus (NCBI)`
+        ),
+        `Superkingdom (NCBI)` = dplyr::case_when(
+          !is.na(`Superkingdom (NCBI)`) ~ `Superkingdom (NCBI)`,
+          `Kingdom (NCBI)` %in% c("Promethearchaeati", "Nanobdellati", "Methanobacteriati", "Thermoproteati") ~ "Archaea",
+          `Kingdom (NCBI)` %in% c("Viridiplantae", "Metazoa", "Fungi") ~ "Eukaryota",
+          `Phylum (NCBI)` %in% c(
+            "Ciliophora", "Euglenozoa", "Oomycota", "Bacillariophyta", "Tubulinea",
+            "Apicomplexa", "Cercozoa", "Endomyxa", "Haptophyta", "Hemimastigophora",
+            "Preaxostyla", "Fornicata", "Rhodophyta", "Discosea", "Heterolobosea",
+            "Nibbleridia", "Parabasalia", "Perkinsozoa", "Foraminifera", "Telonemia",
+            "Nebulidia", "Evosea"
+          ) ~ "Eukaryota",
+          `Kingdom (NCBI)` %in% c("Pseudomonadati", "Bacillati", "Fusobacteriati", "Thermotogati") ~ "Bacteria",
+          stringr::str_detect(`Phylum (NCBI)`, "bacteriota$|bacterota$|bacteria$") ~ "Bacteria",
+          stringr::str_detect(
+            `Phylum (NCBI)`,
+            "Altimarinota$|Moduliflexota$|Microgenomatota$|Binatota$|CPR2$|CPR3$|Methylomirabilota$|Sumerlaeota$"
+          ) ~ "Bacteria",
+          `Kingdom (NCBI)` %in% c("Heunggongvirae") ~ "Viruses",
+          stringr::str_detect(`Phylum (NCBI)`, "WWE3$") ~ "Viruses",
+          TRUE ~ `Superkingdom (NCBI)`
+        )
+      ) %>%
+      dplyr::mutate(dplyr::across(
+        dplyr::all_of(TAXONOMY_RANKS),
+        ~ dplyr::na_if(., "") %>% dplyr::na_if("NA")
+      ))
+
+    for (i in 2:length(TAXONOMY_RANKS)) {
+      current_rank <- TAXONOMY_RANKS[i]
+      higher_rank <- TAXONOMY_RANKS[i - 1]
+      rank_prefix <- stringr::str_to_lower(stringr::word(current_rank, 1))
+      taxonomy_tbl <- taxonomy_tbl %>%
+        dplyr::mutate(!!rlang::sym(current_rank) := dplyr::coalesce(
+          !!rlang::sym(current_rank), paste0(rank_prefix, " of ", !!rlang::sym(higher_rank))
+        ))
+    }
+
+    taxonomy_tbl %>%
+      dplyr::mutate(`Superkingdom (NCBI)` = dplyr::coalesce(
+        `Superkingdom (NCBI)`, paste0("superkingdom of ", `Kingdom (NCBI)`)
+      ))
+  }
+  ```
+
+- **Juntar taxonomia e finalizar.** Junta a taxonomia completa de volta pela `query_taxID` e corrige `BLAST ID` quando o hit BLAST veio abreviado (gênero em uma letra + ponto, ex. `"P.rivularis algo"`), substituindo pelo gênero completo resolvido no NCBI.
+
+  ```{r}
+  join_taxonomy_and_finalize <- function(df, taxonomy_tbl) {
+    df %>%
+      dplyr::left_join(taxonomy_tbl, by = "query_taxID") %>%
+      dplyr::mutate(`BLAST ID` = dplyr::if_else(
+        stringr::str_detect(`BLAST ID`, "^[A-Za-z]\\.[^ ]+ [^ ]+$"),
+        stringr::str_c(`Genus (NCBI)`, stringr::str_extract(`BLAST ID`, "(?<=\\.)[^ ]+"), sep = " "),
+        `BLAST ID`
+      )) %>%
+      dplyr::select(-dplyr::any_of("Sci_name"))
+  }
+  ```
+
+- **Executar a consulta de taxonomia.** Encadeia a consulta ao NCBI, o preenchimento de ranks e o join final.
+
+  ```{r}
+  run_taxonomy_lookup <- function(df, entrez_key = NULL) {
+    taxonomy_tbl <- df$query_taxID %>%
+      retrieve_taxonomy(entrez_key = entrez_key) %>%
+      fill_missing_ranks()
+
+    join_taxonomy_and_finalize(df, taxonomy_tbl)
+  }
+  ```
+
+### Contaminação (fold change vs. controles)
+
+Valores de `Type` que marcam uma linha como sendo de um controle, e a coluna de referência (qual controle a amostra usa) → coluna de Fold Change gerada para aquele tipo, são fixos para os três tipos de controle do contrato de schema deste projeto (`Ext. Control` / `PCR Control` / `Filt. Control`).
+
+- **Valores de `Type` que identificam um controle.** Lista copiada do roots_metabar, com as variantes que de fato aparecem no nosso contrato de schema garantidas.
+
+  ```{r}
+  CONTROL_TYPE_VALUES <- c(
+    "Ext. Control", "Ext. control", "Extraction Control", "Extraction control",
+    "Filt. Control", "Filt. control", "Filtration Control", "Filtration control",
+    "PCR Control", "PCR control",
+    "Negative Control", "Negative control", "Positive Control", "Positive control",
+    "Control"
+  )
+  ```
+
+- **Coluna de referência → coluna de Fold Change.** Mapeia a coluna que, na amostra real, aponta para qual arquivo de controle usar, para o nome da coluna de Fold Change gerada.
+
+  ```{r}
+  CONTROL_REFERENCE_COLUMNS <- c(
+    "Ext. Control"  = "FC to Ext control",
+    "PCR Control"   = "FC to PCR control",
+    "Filt. Control" = "FC to Filt control"
+  )
+  ```
+
+- **Função de fold change.** Equivalente a `gtools::foldchange(num, denom)` (FC = num/denom se num \>= denom, senão -denom/num) — reimplementado aqui para não adicionar uma dependência só por essa fórmula de uma linha.
+
+  ```{r}
+  foldchange <- function(num, denom) {
+    ifelse(num >= denom, num / denom, -denom / num)
+  }
+  ```
+
+- **Máximo seguro.** `max(x, na.rm = TRUE)`, mas sem o aviso "no non-missing arguments" e sem devolver `-Inf` quando o grupo é todo `NA` (ex. dataset sem nenhuma amostra de controle) — devolve `NA_real_` de forma limpa nesse caso.
+
+  ```{r}
+  safe_max <- function(x) {
+    if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)
+  }
+  ```
+
+- **Marcar contaminação.** Para cada linha (ASV numa amostra real), compara com o(s) controle(s) que ela referencia via Fold Change (abundância relativa da amostra dividida pela abundância relativa máxima da mesma ASV no controle referenciado). FC abaixo do limiar em qualquer controle referenciado → `"Possible contamination"`. Ausência de match com nenhum controle (`Control presence` = `FALSE`) não é penalizada — só vira `"True detection"` por omissão, não por evidência.
+
+  ```{r}
+  flag_contamination <- function(df, fold_change_threshold = 10) {
+    df <- df %>%
+      dplyr::mutate(`Relative Abundance Sample` = dplyr::if_else(
+        `Sample total abundance` > 0,
+        `ASV absolute abundance` / `Sample total abundance`,
+        0
+      ))
+
+    ctrl_cols <- intersect(names(CONTROL_REFERENCE_COLUMNS), colnames(df))
+    if (length(ctrl_cols) == 0) {
+      warning(
+        "Nenhuma coluna de controle (Ext./PCR/Filt. Control) encontrada -- ",
+        "pulando checagem de contaminacao.",
+        call. = FALSE
+      )
+      return(dplyr::mutate(df, `Contamination status` = NA_character_, `Control presence` = NA))
+    }
+
+    contam_lookup <- df %>%
+      dplyr::filter(`ASV absolute abundance` > 0, Type %in% CONTROL_TYPE_VALUES) %>%
+      dplyr::group_by(Primer, Unique_File_name, `ASV (Sequence)`) %>%
+      dplyr::summarise(Max_ctrl_abd = safe_max(`Relative Abundance Sample`), .groups = "drop")
+
+    for (ctrl_col in ctrl_cols) {
+      target_col <- CONTROL_REFERENCE_COLUMNS[[ctrl_col]]
+
+      ctrl_matched <- df %>%
+        dplyr::filter(!Type %in% CONTROL_TYPE_VALUES, !is.na(.data[[ctrl_col]]), .data[[ctrl_col]] != "") %>%
+        dplyr::mutate(.ctrl_ref = stringr::str_trim(.data[[ctrl_col]])) %>%
+        dplyr::inner_join(
+          contam_lookup,
+          by = c("Primer", ".ctrl_ref" = "Unique_File_name", "ASV (Sequence)")
+        ) %>%
+        dplyr::group_by(Primer, Unique_File_name, `ASV (Sequence)`) %>%
+        dplyr::summarise(Max_ctrl_abd = safe_max(Max_ctrl_abd), .groups = "drop")
+
+      df <- df %>%
+        dplyr::left_join(ctrl_matched, by = c("Primer", "Unique_File_name", "ASV (Sequence)")) %>%
+        dplyr::mutate(!!target_col := dplyr::if_else(
+          !is.na(Max_ctrl_abd),
+          foldchange(`Relative Abundance Sample`, Max_ctrl_abd),
+          NA_real_
+        )) %>%
+        dplyr::select(-Max_ctrl_abd)
+    }
+
+    fc_cols <- unname(CONTROL_REFERENCE_COLUMNS[ctrl_cols])
+    fc_matrix <- as.matrix(df[fc_cols])
+    contam_flag <- apply(fc_matrix, 1, function(row) any(!is.na(row) & row < fold_change_threshold))
+    control_presence_flag <- apply(fc_matrix, 1, function(row) any(!is.na(row)))
+
+    df %>%
+      dplyr::mutate(
+        `Control presence` = control_presence_flag,
+        `Contamination status` = dplyr::if_else(contam_flag, "Possible contamination", "True detection")
+      )
+  }
+  ```
+
+- **Executar taxonomia + contaminação.** Encadeia a consulta de taxonomia e a checagem de contaminação.
+
+  ```{r}
+  run_taxonomy_and_contamination <- function(df, config = DEFAULT_CONFIG, entrez_key = NULL) {
+    df <- run_taxonomy_lookup(df, entrez_key = entrez_key)
+    flag_contamination(df, fold_change_threshold = config$contaminacao$fold_change_threshold)
+  }
+  ```
+
+## 5. Bloco 4 — Curadoria Final
+
+Este bloco reaproveita a seção 11 do roots_metabar ("Final Results Curation"). O pseudo-score é sempre calculado a partir da identidade/cobertura do hit efetivamente selecionado (`Selected_Hit_Origin`, após descartar hits ruins) — nunca do hit 1 fixo.
+
+### Faixa de amplicon
+
+- **Marcar faixa de amplicon.** Compara `ASV Size (pb)` com a faixa esperada de amplicon do primer (config `amplicon_por_primer`). Primer sem faixa configurada → `NA` (não assumimos "fora da faixa" para um primer desconhecido).
+
+  ```{r}
+  flag_amplicon_length <- function(df, amplicon_por_primer) {
+    range_lookup <- function(primer) amplicon_por_primer[[primer]]
+
+    df %>%
+      dplyr::rowwise() %>%
+      dplyr::mutate(`Primer expected length` = {
+        rng <- range_lookup(Primer)
+        if (is.null(rng)) {
+          NA_character_
+        } else if (`ASV Size (pb)` >= rng[[1]] && `ASV Size (pb)` <= rng[[2]]) {
+          "in range"
+        } else {
+          "out of range"
+        }
+      }) %>%
+      dplyr::ungroup()
+  }
+  ```
+
+### Pseudo-score e identificação
+
+- **Calcular pseudo-score e identificação.** Pseudo-score = `(10*identidade + cobertura) / 11`, calculado a partir do hit efetivamente selecionado (`Selected_Hit_Origin`, ver bloco 2). Sem hit confiável (`Selected_Hit_Origin == "None"`) → pseudo-score `NA` → `"Unidentified"`.
+
+  ```{r}
+  compute_pseudoscore_and_identification <- function(df, thresholds) {
+    df <- df %>%
+      dplyr::mutate(
+        .sel_identity = dplyr::case_when(
+          Selected_Hit_Origin == "1" ~ `1_indentity`,
+          Selected_Hit_Origin == "2" ~ `2_indentity`,
+          Selected_Hit_Origin == "3" ~ `3_indentity`,
+          TRUE ~ NA_real_
+        ),
+        .sel_qcovhsp = dplyr::case_when(
+          Selected_Hit_Origin == "1" ~ `1_qcovhsp`,
+          Selected_Hit_Origin == "2" ~ `2_qcovhsp`,
+          Selected_Hit_Origin == "3" ~ `3_qcovhsp`,
+          TRUE ~ NA_real_
+        ),
+        `BLASTn pseudo-score` = (10 * .sel_identity + .sel_qcovhsp) / 11
+      )
+
+    df %>%
+      dplyr::mutate(
+        Identification = dplyr::case_when(
+          `BLASTn pseudo-score` >= thresholds$especie ~ `BLAST ID`,
+          `BLASTn pseudo-score` >= thresholds$genero ~ `Genus (NCBI)`,
+          `BLASTn pseudo-score` >= thresholds$familia ~ `Family (NCBI)`,
+          `BLASTn pseudo-score` >= thresholds$ordem ~ `Order (NCBI)`,
+          `BLASTn pseudo-score` >= thresholds$classe ~ `Class (NCBI)`,
+          TRUE ~ "Unidentified"
+        ),
+        `Identification Max. taxonomy` = dplyr::case_when(
+          `BLASTn pseudo-score` >= thresholds$especie ~ "Species",
+          `BLASTn pseudo-score` >= thresholds$genero ~ "Genus",
+          `BLASTn pseudo-score` >= thresholds$familia ~ "Family",
+          `BLASTn pseudo-score` >= thresholds$ordem ~ "Order",
+          `BLASTn pseudo-score` >= thresholds$classe ~ "Class",
+          TRUE ~ "Unidentified"
+        )
+      ) %>%
+      dplyr::select(-.sel_identity, -.sel_qcovhsp)
+  }
+  ```
+
+### Flag de táxons-alvo
+
+A marcação de táxons-alvo identifica ASVs que pertencem a um ou mais grupos taxonômicos de interesse ecológico, configurados em `config$taxons_alvo$grupos`. Cada grupo é resolvido a partir de um registro interno que associa o nome do grupo a um reino (`Kingdom (NCBI)`) usado como catch-all e/ou a listas de filo e classe — assim o YAML só precisa declarar **qual** grupo é relevante para o projeto, sem que o usuário precise listar filos e classes manualmente. O registro cobre os grupos ecológicos tipicamente monitorados num projeto de eDNA multi-primer (peixes via Metazoa, macroinvertebrados bentônicos, zooplâncton, fitoplâncton e perifíton); novos grupos podem ser adicionados ao registro conforme o projeto crescer.
+
+- **Registro interno de táxons-alvo.** Associa cada nome de grupo (usado em `config$taxons_alvo$grupos`) a um reino catch-all opcional e às listas de filo/classe que o compõem.
+
+  ```{r}
+  TARGET_TAXA_REGISTRY <- list(
+    Metazoa = list(
+      kingdom = "Metazoa",
+      phyla = character(0),
+      classes = character(0)
+    ),
+    Benthos = list(
+      kingdom = NA_character_,
+      phyla = c("Annelida", "Arthropoda", "Mollusca"),
+      classes = c("Bivalvia", "Clitellata", "Gastropoda", "Insecta")
+    ),
+    Zooplankton = list(
+      kingdom = NA_character_,
+      phyla = c("Amoebozoa", "Cercozoa", "Ciliophora", "Rotifera"),
+      classes = c("Branchiopoda", "Eurotatoria", "Filosia", "Hexanauplia", "Lobosa", "Oligohymenophorea")
+    ),
+    Periphyton = list(
+      kingdom = NA_character_,
+      phyla = c(
+        "Bacillariophyta", "Charophyta", "Chlorophyta", "Cryptophyta",
+        "Cyanobacteria", "Euglenophyta", "Rhodophyta"
+      ),
+      classes = c(
+        "Bacillariophyceae", "Chlorophyceae", "Chrysophyceae",
+        "Coscinodiscophyceae", "Cryptophyceae", "Cyanophyceae",
+        "Euglenophyceae", "Florideophyceae", "Mediophyceae", "Ulvophyceae",
+        "Zygnematophyceae"
+      )
+    ),
+    Phytoplankton = list(
+      kingdom = NA_character_,
+      phyla = c(
+        "Dinophyta", "Ochrophyta", "Apicomplexa", "Discosea", "Endomyxa",
+        "Euglenozoa", "Evosea", "Foraminifera", "Fornicata", "Haptophyta",
+        "Hemimastigophora", "Heterolobosea", "Nebulidia", "Nibbleridia",
+        "Oomycota", "Parabasalia", "Perkinsozoa", "Preaxostyla", "Tubulinea"
+      ),
+      classes = c(
+        "Dinophyceae", "Trebouxiophyceae", "Actinophryidae", "Aphelidea",
+        "Bigyra", "Bolidophyceae", "Breviatea", "Centroplasthelida",
+        "Choanoflagellata", "Developea", "Dictyochophyceae",
+        "Eustigmatophyceae", "Filasterea", "Glaucocystophyceae",
+        "Hyphochytriomycetes", "Ichthyosporea", "Olisthodiscophyceae",
+        "Pelagophyceae", "Phaeophyceae", "Phaeothamniophyceae",
+        "Raphidophyceae", "Synurophyceae", "Xanthophyceae"
+      )
+    )
+  )
+  ```
+
+- **Marcar `Possible target taxon`.** Exclui matches não confiáveis/ambientais e Bacteria/Archaea/Viruses; inclui qualquer ASV cujo reino bata com um dos catch-alls configurados, ou cujo filo/classe esteja nas listas dos grupos selecionados em `config$taxons_alvo$grupos`.
+
+  ```{r}
+  flag_target_taxa <- function(df, grupos, registry = TARGET_TAXA_REGISTRY) {
+    unknown <- setdiff(grupos, names(registry))
+    if (length(unknown) > 0) {
+      stop(sprintf(
+        "Grupo(s) de taxons-alvo desconhecido(s): %s. Grupos disponiveis: %s",
+        paste(unknown, collapse = ", "), paste(names(registry), collapse = ", ")
+      ), call. = FALSE)
+    }
+
+    selected <- registry[grupos]
+    target_phyla <- unique(unlist(purrr::map(selected, "phyla")))
+    target_classes <- unique(unlist(purrr::map(selected, "classes")))
+    target_kingdoms <- unique(purrr::discard(purrr::map_chr(selected, "kingdom"), is.na))
+
+    df %>%
+      dplyr::mutate(`Possible target taxon` = dplyr::case_when(
+        stringr::str_detect(`BLAST ID`, "Chordate environmental") ~ FALSE,
+        stringr::str_detect(`BLAST ID`, "Match_not_reliable") ~ FALSE,
+        stringr::str_detect(`Superkingdom (NCBI)`, "Bacteria|Archaea|Viruses") ~ FALSE,
+        is.na(`Kingdom (NCBI)`) ~ FALSE,
+        stringr::str_detect(`Superkingdom (NCBI)`, "Eukaryota") &
+          (`Phylum (NCBI)` %in% target_phyla) ~ TRUE,
+        stringr::str_detect(`Superkingdom (NCBI)`, "Eukaryota") &
+          (`Class (NCBI)` %in% target_classes) ~ TRUE,
+        `Kingdom (NCBI)` %in% target_kingdoms ~ TRUE,
+        TRUE ~ FALSE
+      ))
+  }
+  ```
+
+- **Executar a curadoria final.** Encadeia a marcação de faixa de amplicon, o cálculo de pseudo-score/identificação e a marcação de táxons-alvo.
+
+  ```{r}
+  run_final_curation <- function(df, config = DEFAULT_CONFIG) {
+    df %>%
+      flag_amplicon_length(config$amplicon_por_primer) %>%
+      compute_pseudoscore_and_identification(config$identificacao$pseudoscore_thresholds) %>%
+      flag_target_taxa(config$taxons_alvo$grupos)
+  }
+  ```
+
+## 6. Bloco 5 — Árvore Filogenética ASV-contra-ASV + Vizinhos
+
+O escopo deste bloco é ASV-contra-ASV (sem banco de referência externo); o piso de tamanho de entrada é o mínimo declarado em `amplicon_por_primer` para o primer da ASV, e o número de vizinhos extraídos por ASV é configurável via `arvore_filogenetica$k_vizinhos` (default 5). O método usado — `DECIPHER::AlignSeqs` (alinhamento múltiplo) + `ape::dist.dna(model="raw", pairwise.deletion=TRUE)` (distância-p) + `ape::njs` (Neighbor-Joining tolerante a distâncias faltantes) — é a mesma combinação de pacotes já usada no script de ecologia do projeto (`eDNA_cipo_script.qmd`).
+
+- **Converter alinhamento para DNAbin.** Converte um `DNAStringSet` (Biostrings) alinhado num objeto `DNAbin` (ape).
+
+  ```{r}
+  dnastringset_to_dnabin <- function(dna_stringset) {
+    char_list <- as.character(dna_stringset)
+    mat <- do.call(rbind, base::strsplit(char_list, ""))
+    rownames(mat) <- names(dna_stringset)
+    ape::as.DNAbin(mat)
+  }
+  ```
+
+- **Montar a árvore ASV-contra-ASV.** Pega sequências únicas que passam no piso de tamanho do primer (config `amplicon_por_primer`), alinha e constrói a árvore. Retorna `NULL` (com aviso) se sobrarem menos de 3 ASVs — não dá pra montar vizinhança útil com menos que isso.
+
+  ```{r}
+  build_asv_tree <- function(df, amplicon_por_primer) {
+    unique_asvs <- df %>%
+      dplyr::distinct(Primer, `ASV (Sequence)`, `ASV header`) %>%
+      dplyr::rowwise() %>%
+      dplyr::mutate(.floor_bp = {
+        rng <- amplicon_por_primer[[Primer]]
+        if (is.null(rng)) NA_real_ else rng[[1]]
+      }) %>%
+      dplyr::ungroup() %>%
+      dplyr::filter(!is.na(.floor_bp), nchar(`ASV (Sequence)`) >= .floor_bp)
+
+    if (nrow(unique_asvs) < 3) {
+      warning(
+        "Menos de 3 ASVs unicas passam no piso de tamanho do primer -- ",
+        "arvore filogenetica pulada (vizinhos ficam NA).",
+        call. = FALSE
+      )
+      return(NULL)
+    }
+
+    dna_set <- Biostrings::DNAStringSet(unique_asvs$`ASV (Sequence)`)
+    names(dna_set) <- unique_asvs$`ASV header`
+
+    aligned <- DECIPHER::AlignSeqs(dna_set, anchor = NA, verbose = FALSE)
+    dna_bin <- dnastringset_to_dnabin(aligned)
+
+    # njs() (nao nj()) porque pairwise.deletion pode gerar NA quando duas ASVs
+    # nao tem nenhum sitio comparavel em comum no alinhamento -- njs() e a
+    # variante do Neighbor-Joining tolerante a distancias faltantes.
+    dist_matrix <- ape::dist.dna(dna_bin, model = "raw", pairwise.deletion = TRUE)
+    ape::njs(dist_matrix)
+  }
+  ```
+
+- **Extrair os k vizinhos mais próximos.** Extrai os k vizinhos mais próximos de cada ASV na árvore (por distância patrística, `ape::cophenetic.phylo`) — evidência filogenética auxiliar para uma eventual curadoria assistida por LLM (informa, não decide sozinha).
+
+  ```{r}
+  extract_k_neighbors <- function(tree, k = 5) {
+    if (is.null(tree)) {
+      return(tibble::tibble(`ASV header` = character(0), `Vizinhos filogeneticos (k)` = character(0)))
+    }
+
+    patristic <- ape::cophenetic.phylo(tree)
+
+    neighbor_strings <- vapply(rownames(patristic), function(tip) {
+      dists <- sort(patristic[tip, ])
+      dists <- dists[names(dists) != tip]
+      top_k <- names(dists)[seq_len(min(k, length(dists)))]
+      paste(top_k, collapse = "; ")
+    }, character(1))
+
+    tibble::tibble(
+      `ASV header` = rownames(patristic),
+      `Vizinhos filogeneticos (k)` = neighbor_strings
+    )
+  }
+  ```
+
+- **Executar a árvore filogenética.** `ASV header` é a chave de join de volta pra tabela long-format: é a mesma para todas as linhas-amostra de uma dada ASV (calculada uma vez no bloco 1), então um lookup por ASV única se propaga corretamente para todas as ocorrências dela.
+
+  ```{r}
+  run_phylogenetic_tree <- function(df, config = DEFAULT_CONFIG) {
+    tree <- build_asv_tree(df, config$amplicon_por_primer)
+    neighbors <- extract_k_neighbors(tree, k = config$arvore_filogenetica$k_vizinhos)
+
+    df %>%
+      dplyr::left_join(neighbors, by = "ASV header")
+  }
+  ```
+
+## 7. Bloco 6 — Checagem Regional GBIF
+
+A fonte e a área da checagem regional vêm de `config$checagem_regional` (`fonte = "gbif"` e um bounding box `area_bbox`). O bounding box é usado exatamente como declarado, sem qualquer margem adicional aplicada automaticamente — para cobrir uma área maior, basta declarar um bbox maior no config. O script busca apenas o **fato** (quantos registros do GBIF existem para essa espécie dentro da área declarada); a **plausibilidade** (a espécie faz sentido nessa região?) é julgamento de uma etapa posterior, não um cálculo determinístico daqui.
+
+- **Construir o polígono WKT.** Monta o polígono WKT (ordem "longitude latitude", como o GBIF espera) a partir do bounding box declarado no config.
+
+  ```{r}
+  bbox_to_wkt <- function(area_bbox) {
+    sprintf(
+      "POLYGON((%f %f, %f %f, %f %f, %f %f, %f %f))",
+      area_bbox$long_min, area_bbox$lat_min,
+      area_bbox$long_max, area_bbox$lat_min,
+      area_bbox$long_max, area_bbox$lat_max,
+      area_bbox$long_min, area_bbox$lat_max,
+      area_bbox$long_min, area_bbox$lat_min
+    )
+  }
+  ```
+
+- **Contar registros regionais no GBIF.** Conta registros do GBIF pra um nome científico dentro da área declarada. `NA` (não `0`) se a consulta falhar — não confundir "sem registro" com "não consultou" (rede indisponível, nome não resolvido no GBIF etc.).
+
+  ```{r}
+  gbif_regional_count <- function(scientific_name, wkt, verbose = TRUE) {
+    if (is.na(scientific_name) || !nzchar(scientific_name)) return(NA_integer_)
+    if (verbose) message(sprintf("GBIF: %s", scientific_name))
+    tryCatch(
+      {
+        res <- rgbif::occ_search(scientificName = scientific_name, geometry = wkt, limit = 1)
+        as.integer(res$meta$count)
+      },
+      error = function(e) {
+        warning(
+          sprintf("Falha na consulta GBIF para '%s': %s", scientific_name, conditionMessage(e)),
+          call. = FALSE
+        )
+        NA_integer_
+      }
+    )
+  }
+  ```
+
+- **Executar a checagem regional.** Só consulta o GBIF pra identificações em nível de **espécie** (onde faz sentido perguntar "essa espécie já foi registrada nessa região?"); identificações em nível de gênero/família/ordem/classe ou `"Unidentified"` ficam `NA` nesta coluna. Cacheia por nome único (não por linha) pra não repetir a mesma consulta centenas de vezes.
+
+  ```{r}
+  run_regional_check <- function(df, config = DEFAULT_CONFIG) {
+    if (!identical(config$checagem_regional$fonte, "gbif")) {
+      warning(
+        "checagem_regional$fonte != 'gbif' -- checagem regional pulada ",
+        "(sem implementacao alternativa ainda).",
+        call. = FALSE
+      )
+      return(dplyr::mutate(df, `GBIF regional occurrence count` = NA_integer_))
+    }
+
+    wkt <- bbox_to_wkt(config$checagem_regional$area_bbox)
+
+    species_lookup <- df %>%
+      dplyr::filter(`Identification Max. taxonomy` == "Species") %>%
+      dplyr::distinct(Identification) %>%
+      dplyr::mutate(
+        `GBIF regional occurrence count` = purrr::map_int(Identification, gbif_regional_count, wkt = wkt)
+      )
+
+    df %>%
+      dplyr::left_join(species_lookup, by = "Identification")
+  }
+  ```
+
+## 8. Entrada de Linha de Comando
+
+- **Parsear argumentos da CLI.** Extrai o caminho de entrada e as flags opcionais `--config=` e `--output=` de `commandArgs()`.
+
+  ```{r}
+  parse_cli_args <- function(args) {
+    config_path <- NULL
+    output_path <- NULL
+    positional <- character(0)
+
+    for (a in args) {
+      if (startsWith(a, "--config=")) {
+        config_path <- sub("^--config=", "", a)
+      } else if (startsWith(a, "--output=")) {
+        output_path <- sub("^--output=", "", a)
+      } else {
+        positional <- c(positional, a)
+      }
+    }
+
+    if (length(positional) < 1) {
+      stop(
+        "Uso: Rscript curadoria_deterministica.R <entrada.csv> [--config=config.yaml] [--output=saida.csv]",
+        call. = FALSE
+      )
+    }
+
+    list(input = positional[1], config = config_path, output = output_path)
+  }
+  ```
+
+## 9. Função Principal
+
+- **Executar o pipeline completo.** Encadeia todos os blocos (1 a 6), imprime um resumo de diagnóstico no console e, se `--output` foi informado, exporta a tabela final via `write_csv2`.
+
+  ```{r}
+  main <- function(args) {
+    parsed <- parse_cli_args(args)
+    config <- load_config(parsed$config)
+
+    df <- run_setup_parsing(parsed$input, config = config)
+    df <- run_blast_refinement(df)
+    df <- run_taxonomy_and_contamination(df, config = config)
+    df <- run_final_curation(df, config = config)
+    df <- run_phylogenetic_tree(df, config = config)
+    df <- run_regional_check(df, config = config)
+
+    cat(sprintf("Tabela parseada: %d linhas, %d colunas.\n", nrow(df), ncol(df)))
+    cat("Colunas calculadas localmente: ASV Size (pb), Sample total abundance, ASV header.\n")
+    cat("Origem do hit selecionado (Selected_Hit_Origin):\n")
+    print(table(df$Selected_Hit_Origin, useNA = "always"))
+    cat(sprintf(
+      "BLAST ID = 'Match_not_reliable' em %d de %d linhas.\n",
+      sum(df$`BLAST ID` == "Match_not_reliable"), nrow(df)
+    ))
+    cat("Status de contaminacao:\n")
+    print(table(df$`Contamination status`, useNA = "always"))
+    cat("Faixa de amplicon (Primer expected length):\n")
+    print(table(df$`Primer expected length`, useNA = "always"))
+    cat("Identificacao maxima (Identification Max. taxonomy):\n")
+    print(table(df$`Identification Max. taxonomy`, useNA = "always"))
+    cat(sprintf("Grupos de taxons-alvo configurados: %s\n", paste(config$taxons_alvo$grupos, collapse = ", ")))
+    cat("Possible target taxon:\n")
+    print(table(df$`Possible target taxon`, useNA = "always"))
+    cat(sprintf(
+      "Vizinhos filogeneticos calculados para %d de %d linhas (NA = ASV abaixo do piso de tamanho).\n",
+      sum(!is.na(df$`Vizinhos filogeneticos (k)`)), nrow(df)
+    ))
+    cat(sprintf(
+      "Checagem regional GBIF: %d linhas com identificacao em nivel de especie consultadas.\n",
+      sum(!is.na(df$`GBIF regional occurrence count`))
+    ))
+    print(dplyr::glimpse(df))
+
+    if (!is.null(parsed$output)) {
+      readr::write_csv2(df, parsed$output)
+      cat(sprintf("Tabela parseada salva em: %s\n", parsed$output))
+    }
+
+    invisible(df)
+  }
+  ```
+
+- **Ponto de entrada.** O `if (!interactive())` impede que `main()` rode sozinho quando o documento é aberto interativamente (RStudio/Positron) — nesse modo, as funções acima ficam disponíveis para chamar uma a uma e inspecionar o resultado. Quando o script/documento é executado via `Rscript`, `main()` roda com os argumentos passados na linha de comando.
+
+  ```{r}
+  if (!interactive()) {
+    main(commandArgs(trailingOnly = TRUE))
+  }
+  ```

@@ -19,3 +19,7 @@ Thumbs.db
 # Logs de execucao do harness (harness/orchestrator.py) -- gerados a cada
 # run, nao sao codigo nem dado de demonstracao.
 /runs/
+
+# Backups pessoais e notas de handoff -- nao fazem parte do pacote entregue.
+/r/old/
+/RESUMO_SESSAO.md

@@ -24,7 +24,7 @@ OUTPUT_CURATION_COLUMNS = [
     "Contamination status",
     "Identification",
     "Identification Max. taxonomy",
-    "Possible Metazoa",
+    "Possible target taxon",
 ]
 
 

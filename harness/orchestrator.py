@@ -42,7 +42,7 @@ EXPECTED_OUTPUT_COLUMNS = [
     "Contamination status",
     "Identification",
     "Identification Max. taxonomy",
-    "Possible Metazoa",
+    "Possible target taxon",
 ]
 
 
