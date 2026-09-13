@@ -8,13 +8,18 @@ Divisao de responsabilidades (nenhuma logica de curadoria mora aqui):
                                    como subprocesso).
   - harness/llm_curation.py       curadoria assistida por LLM (etapa
                                    opcional, so pra ASVs inconclusivas).
+  - harness/report_generation.py  relatorio narrativo da execucao (etapa
+                                   opcional, apoiada por LLM sobre agregados
+                                   ja calculados).
   - harness/orchestrator.py       conecta tudo, verifica a saida e grava
                                    um log estruturado de cada run.
 
 Fluxo: valida -> (recusa se bloqueante) -> roda o R -> verifica a saida ->
-curadoria assistida por LLM (opcional) -> loga. Cada etapa gera um
-"RunResult" serializavel, gravado em `runs/<timestamp>.json`, para
-responder depois "o que foi feito e por que" sem precisar reexecutar nada.
+curadoria assistida por LLM (opcional) -> relatorio narrativo (opcional) ->
+loga. Cada etapa gera um "RunResult" serializavel, gravado em
+`runs/<timestamp>.json` (relatorio em `runs/<timestamp>_relatorio.md`),
+para responder depois "o que foi feito e por que" sem precisar reexecutar
+nada.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from typing import Callable, Optional
 import pandas as pd
 
 from harness.llm_curation import LlmCurationResult, load_traditional_species, run_llm_assisted_curation
+from harness.report_generation import ReportContext, ReportGenerationResult, generate_report
 from tools.schema_validation import load_schema, validate_asv_table
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -69,6 +75,9 @@ class RunResult:
     llm_total_unique_asvs: int = 0
     llm_errors: list[str] = field(default_factory=list)
     llm_skipped_reason: Optional[str] = None
+    report_path: Optional[str] = None
+    report_mode: Optional[str] = None
+    report_error: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -179,9 +188,11 @@ def run(
     pra nao depender de R instalado nem de rede (NCBI/GBIF) pra verificar a
     logica de orquestracao em si.
 
-    `llm_mode`: "live" (default, chama a Groq -- degrada pra "off" sozinho
-    se GROQ_API_KEY nao estiver configurada), "mock" (simula a resposta,
-    sem rede -- so testa o encadeamento) ou "off" (pula a etapa por
+    `llm_mode`: controla tanto a curadoria assistida quanto o relatorio
+    narrativo da execucao (harness/report_generation.py) -- "live"
+    (default, chama a Groq pras duas etapas -- degrada pra "off" sozinho se
+    GROQ_API_KEY nao estiver configurada), "mock" (simula as respostas, sem
+    rede -- so testa o encadeamento) ou "off" (pula as duas etapas por
     completo, so entrega a curadoria deterministica).
 
     `traditional_species_csv`: caminho opcional para a tabela de especies
@@ -259,6 +270,7 @@ def run(
     status = "success" if proc.returncode == 0 and not verification_issues else "failed"
 
     llm_result = None
+    curated_df = None
     if status == "success":
         try:
             traditional_species_df = (
@@ -278,6 +290,34 @@ def run(
             # resultado ja validado, so ficar registrada.
             llm_result = LlmCurationResult(mode="off", skipped_reason=f"Falha inesperada na curadoria assistida: {exc}")
 
+    report_text = None
+    report_result = None
+    if status == "success" and curated_df is not None and llm_result is not None:
+        try:
+            report_context = ReportContext(
+                input_path=str(input_csv),
+                row_count=len(df),
+                started_at=started_at,
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                llm_reviewed_count=llm_result.reviewed_count,
+                llm_total_unique_asvs=llm_result.total_unique_asvs,
+                llm_errors=llm_result.errors,
+                llm_skipped_reason=llm_result.skipped_reason,
+            )
+            report_text, report_result = generate_report(curated_df, report_context, mode=llm_mode)
+        except Exception as exc:
+            # Mesma logica de protecao acima: uma falha inesperada na geracao
+            # do relatorio nao invalida a curadoria ja concluida e verificada.
+            report_result = ReportGenerationResult(mode="off", error=f"Falha inesperada na geracao do relatorio: {exc}")
+
+    report_path = None
+    if report_text is not None:
+        timestamp = started_at.replace(":", "-").replace("+00-00", "Z")
+        report_file = runs_dir / f"{timestamp}_relatorio.md"
+        report_file.parent.mkdir(parents=True, exist_ok=True)
+        report_file.write_text(report_text, encoding="utf-8")
+        report_path = str(report_file)
+
     result = RunResult(
         status=status,
         input_path=str(input_csv),
@@ -295,6 +335,9 @@ def run(
         llm_total_unique_asvs=llm_result.total_unique_asvs if llm_result else 0,
         llm_errors=llm_result.errors if llm_result else [],
         llm_skipped_reason=llm_result.skipped_reason if llm_result else None,
+        report_path=report_path,
+        report_mode=report_result.mode if report_result else None,
+        report_error=report_result.error if report_result else None,
     )
     write_run_log(result, runs_dir)
     return result

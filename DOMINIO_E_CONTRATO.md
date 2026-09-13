@@ -43,6 +43,7 @@ Um CSV final (mesmo formato de entrada), com as colunas reordenadas para compati
 - **Determinísticas** (R): `BLAST ID`, `Identification`, `Identification Max. taxonomy`, `BLASTn pseudo-score`, `Contamination status`, `Primer expected length`, `Possible target taxon`, taxonomia NCBI completa (Gênero a Superreino), `Vizinhos filogenéticos (k)`, `GBIF regional occurrence count`, `FC to Ext/Filt control`, `Control presence`.
 - **Assistidas por LLM** (Python + Groq, opcional): `Assisted ID (LLM)`, `Assisted Confidence (LLM)`, `Assisted Justification (LLM)`, preenchidas apenas para as sequências cuja identificação determinística não foi conclusiva. Nunca sobrescrevem as colunas acima.
 - Um **log JSON por execução** (`runs/<timestamp>.json`): status (recusado, sucesso ou falha), resumo da validação, o que a curadoria assistida revisou, avisos e erros. Serve para reconstruir depois o que foi feito e por quê, sem precisar reexecutar nada.
+- Um **relatório narrativo por execução** (`runs/<timestamp>_relatorio.md`, opcional, mesmo interruptor `--llm-mode`): síntese em markdown do que essa execução encontrou (contexto, contagens por categoria, casos concretos em que a curadoria assistida divergiu da determinística, limitações). Gerado por LLM sobre agregados já calculados em Python (`harness/report_generation.py`) — nunca lê a tabela bruta nem inventa número fora do que foi computado.
 
 ## Fora de escopo
 

@@ -111,6 +111,13 @@ def main(argv: list[str] | None = None) -> int:
             for err in result.llm_errors[:5]:
                 print(f"    - {err}")
 
+    if result.report_path:
+        print(f"Relatorio da execucao: {result.report_path}")
+    elif result.report_error:
+        print(f"Geracao do relatorio falhou: {result.report_error}")
+    elif result.report_mode == "off":
+        print("Geracao do relatorio pulada (mesmo motivo da curadoria assistida, ver acima).")
+
     return 0
 
 

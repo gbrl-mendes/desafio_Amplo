@@ -96,6 +96,57 @@ def test_success_when_valid_input_and_r_succeeds(tmp_path):
     assert output_csv.exists()
 
 
+def _fake_success_runner_with_evidence(rscript_exe, input_csv, output_csv, config_path, timeout):
+    """Como `_fake_success_runner`, mas com as colunas de evidencia que
+    harness.llm_curation e harness.report_generation esperam -- necessarias
+    so quando o teste exercita llm_mode != "off"."""
+    df = pd.read_csv(input_csv, sep=";", decimal=",", encoding="utf-8")
+    df = _add_curation_columns(df)
+    n = len(df)
+    df["Type"] = "Sample"
+    df["ASV header"] = [f">ASV_{i}-150bp" for i in range(n)]
+    df["Identification Max. taxonomy"] = "Species"
+    df["Primer expected length"] = "in range"
+    df["Selected_Hit_Origin"] = "1"
+    df["Genus (NCBI)"] = "Astyanax"
+    df["Family (NCBI)"] = "Characidae"
+    df["Order (NCBI)"] = "Characiformes"
+    df["Class (NCBI)"] = "Actinopteri"
+    df["BLASTn pseudo-score"] = 99.0
+    df["Vizinhos filogeneticos (k)"] = ""
+    df["GBIF regional occurrence count"] = 10
+    df["Ponto"] = "SC1"
+    df["Habitat"] = "Cânion"
+    df["Rios"] = "Mascate"
+    df.to_csv(output_csv, sep=";", decimal=",", index=False, encoding="utf-8")
+    return subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
+
+
+def test_success_writes_report_alongside_json_log_in_mock_mode(tmp_path):
+    df = _valid_input_df()
+    input_csv = tmp_path / "entrada.csv"
+    _write_input_csv(input_csv, df)
+    output_csv = tmp_path / "saida.csv"
+    runs_dir = tmp_path / "runs"
+
+    result = run(
+        input_csv,
+        output_csv=output_csv,
+        runs_dir=runs_dir,
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="mock",  # mesma flag liga curadoria assistida e relatorio, sem rede
+    )
+
+    assert result.status == "success"
+    assert result.report_mode == "mock"
+    assert result.report_path is not None
+    report_file = Path(result.report_path)
+    assert report_file.exists()
+    assert report_file.parent == runs_dir
+    assert "[mock]" in report_file.read_text(encoding="utf-8")
+
+
 def test_failed_when_r_exits_nonzero(tmp_path):
     df = _valid_input_df()
     input_csv = tmp_path / "entrada.csv"

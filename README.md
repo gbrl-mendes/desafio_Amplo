@@ -20,8 +20,9 @@ calibração de cada parâmetro estão documentadas nos comentários do próprio
 | [`tools/schema_validation.py`](tools/schema_validation.py) | Valida o contrato de entrada (Python) — recusa antes de rodar qualquer coisa se faltar coluna obrigatória, houver vazamento de gabarito, ou a chave primária for duplicada. |
 | [`r/curadoria_deterministica.qmd`](r/curadoria_deterministica.qmd) | Toda a lógica determinística (R): parsing, BLAST, taxonomia NCBI, contaminação, faixa de amplicon, pseudo-score, árvore filogenética, checagem regional GBIF. Fonte de verdade — o `.R` é gerado a partir dele (`knitr::purl`). |
 | [`r/curadoria_deterministica.R`](r/curadoria_deterministica.R) | Versão executável (gerada) do `.qmd` acima — é o que o harness realmente chama via subprocesso. |
-| [`harness/orchestrator.py`](harness/orchestrator.py) | Conecta tudo: valida → roda o R → verifica a saída → curadoria assistida por LLM → grava um log JSON por execução. |
+| [`harness/orchestrator.py`](harness/orchestrator.py) | Conecta tudo: valida → roda o R → verifica a saída → curadoria assistida por LLM → relatório narrativo → grava um log JSON por execução. |
 | [`harness/llm_curation.py`](harness/llm_curation.py) | Curadoria assistida por LLM (Groq, gratuito) — só para ASVs cuja identificação determinística não foi conclusiva. |
+| [`harness/report_generation.py`](harness/report_generation.py) | Relatório narrativo da execução (Groq), gerado sobre agregados já calculados em Python — o LLM nunca lê a tabela bruta nem inventa número. |
 | [`harness/__main__.py`](harness/__main__.py) | Ponto de entrada da linha de comando (`python -m harness`). |
 
 ## Requisitos
@@ -59,9 +60,10 @@ python -m harness <entrada.csv> [--config config.yaml] [--output saida.csv] [--l
   Fold Change, faixa de amplicon por primer, limiares de pseudo-score, k de vizinhos
   filogenéticos, área regional do GBIF). Registrado no log do run para rastreabilidade.
 - `--output`: caminho do CSV final (default: `runs/<nome-da-entrada>_curado.csv`).
-- `--llm-mode`: `live` (default; usa a chave em `.env`, pula sozinho se não houver chave),
-  `mock` (simula a resposta, sem rede — útil pra inspecionar o mecanismo sem gastar cota) ou
-  `off` (pula por completo).
+- `--llm-mode`: controla tanto a curadoria assistida quanto o relatório narrativo da execução.
+  `live` (default; usa a chave em `.env`, pula sozinho se não houver chave), `mock` (simula as
+  respostas, sem rede — útil pra inspecionar o mecanismo sem gastar cota) ou `off` (pula as
+  duas etapas por completo).
 - `--reference`: CSV opcional (`;`-delimitado, UTF-8, colunas `Ponto` e `Taxon_binomial`) com
   espécies já registradas por métodos tradicionais de monitoramento (captura física) nos
   mesmos pontos amostrais — usado como evidência adicional na curadoria assistida por LLM (ver
@@ -78,7 +80,8 @@ python -m harness data/example/dasafio_Amplo-ASVs_BLASTr_output-2026-09-12.csv -
 ```
 
 Roda a curadoria completa sobre o dado de demonstração (815 ASVs×amostra, eDNA_Cipo,
-MiFish2) e grava `saida.csv` + um log em `runs/`.
+MiFish2) e grava `saida.csv` + um log em `runs/<timestamp>.json` + um relatório narrativo em
+`runs/<timestamp>_relatorio.md`.
 
 ## Formatos de entrada e saída
 
