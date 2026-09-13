@@ -1,28 +1,14 @@
-# Python
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
-
-# R
 .Rhistory
 .RData
 .Rproj.user/
-
-# OS
 .DS_Store
 Thumbs.db
-
-# LibreOffice/OpenOffice lock files (left behind when a CSV/xlsx is open)
 .~lock.*#
-
-# Logs de execucao do harness (harness/orchestrator.py) -- gerados a cada
-# run, nao sao codigo nem dado de demonstracao.
 /runs/
-
-# Backups pessoais e notas de handoff -- nao fazem parte do pacote entregue.
 /r/old/
 /RESUMO_SESSAO.md
-
-# Saidas de teste manuais (ex. rodadas experimentais no Positron).
 /saida_teste.csv
