@@ -13,7 +13,7 @@ A pessoa responsável por transformar essa tabela bruta numa base de dados confi
 1. Qual identificação taxonômica ela sustenta, e até que nível (espécie, gênero, família...), sem afirmar mais do que a evidência permite.
 2. Se ela representa a detecção real de um organismo ou uma provável contaminação, comparando com os controles negativos processados junto com as amostras.
 3. Se o tamanho da sequência é compatível com o marcador genético usado no sequenciamento.
-4. Quando essas três decisões não dão uma resposta clara sozinhas, uma segunda camada, com apoio de um modelo de linguagem, avalia a plausibilidade biológica e geográfica da identificação usando evidência adicional: sequências parecidas dentro do próprio lote, registros de ocorrência pública da espécie na região (GBIF), e espécimes já coletados fisicamente na mesma área em campanhas anteriores, quando disponível para aquele ponto específico.
+4. Quando essas três decisões não dão uma resposta clara sozinhas, uma segunda camada, com apoio de um modelo de linguagem, avalia a plausibilidade biológica e geográfica da identificação usando evidência adicional: sequências parecidas dentro do próprio lote, registros de ocorrência pública da espécie na região (GBIF), e espécimes já coletados fisicamente na mesma área em campanhas anteriores, quando disponível para aquele ponto específico (segundo input opcional, formato descrito em Domínio e família de dados).
 
 O resultado é uma base de dados curada: a identificação de cada sequência, por ponto de coleta, com o nível de confiança de cada identificação e a evidência que a sustenta. É essa base que embasa o relatório técnico entregue ao órgão ambiental.
 
@@ -33,6 +33,8 @@ Monitoramento de biodiversidade de peixes via metabarcoding de eDNA. Dados de de
 - Cada amostra referencia seus controles diretamente pelas colunas `Ext. Control`, `PCR Control` e `Filt. Control` (nome do `Unique_File_name` do controle correspondente).
 
 O sistema é parametrizado (`--config`), não fixo para este dataset. Outro marcador genético, outro projeto de eDNA de peixes, ou outro grupo ecológico (o registro de grupos-alvo em `TARGET_TAXA_REGISTRY` já cobre bentos, zooplâncton, fitoplâncton e perifíton, além de peixes) pode reaproveitar a mesma arquitetura ajustando o arquivo de configuração.
+
+**Segundo input, opcional:** tabela de espécies obtidas por métodos tradicionais de monitoramento (captura física, não eDNA) nos mesmos pontos amostrais, usada só como evidência adicional na camada assistida por LLM (decisão 4 acima) — nunca entra na curadoria determinística. CSV `;`-delimitado, UTF-8, uma linha por combinação espécie×ponto, colunas `Ponto` e `Taxon_binomial`; exemplo em [`data/example/spp_tradicional.csv`](data/example/spp_tradicional.csv). Repassado via `--traditional-species` (ver Ponto de entrada e execução). Sem essa tabela, a curadoria assistida roda normalmente, só sem essa evidência extra.
 
 ## Saídas previstas
 
@@ -68,5 +70,5 @@ Um CSV final (mesmo formato de entrada), com as colunas reordenadas para compati
 Ver [README](README.md) para instalação, dependências e exemplo de execução. Em resumo:
 
 ```bash
-python -m harness data/example/dasafio_Amplo-ASVs_BLASTr_output-2026-09-12.csv --output saida.csv
+python -m harness data/example/dasafio_Amplo-ASVs_BLASTr_output-2026-09-12.csv --output saida.csv --traditional-species data/example/spp_tradicional.csv
 ```
