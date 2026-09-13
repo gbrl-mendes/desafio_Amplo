@@ -71,5 +71,5 @@ Um CSV final (mesmo formato de entrada), com as colunas reordenadas para compati
 Ver [README](README.md) para instalação, dependências e exemplo de execução. Em resumo:
 
 ```bash
-python -m harness data/example/dasafio_Amplo-ASVs_BLASTr_output-2026-09-12.csv --output saida.csv --reference data/example/spp_tradicional.csv
+python -m harness data/example/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --output saida.csv --reference data/example/spp_tradicional.csv
 ```
