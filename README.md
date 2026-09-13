@@ -7,8 +7,10 @@ evidência já calculada para uma segunda opinião — sem nunca sobrescrever o 
 determinístico.
 
 Ver [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md) para o problema, domínio, formatos, saídas
-e limitações declaradas deste sistema. As decisões de arquitetura e a calibração de cada
-parâmetro estão documentadas nos comentários do próprio
+e limitações declaradas deste sistema, e [RELATORIO_EXEMPLO.md](RELATORIO_EXEMPLO.md) para uma
+execução real, completa, sobre o dado de demonstração (com achados concretos, inclusive um
+limite de cota do LLM atingido durante essa própria execução). As decisões de arquitetura e a
+calibração de cada parâmetro estão documentadas nos comentários do próprio
 [`r/curadoria_deterministica.qmd`](r/curadoria_deterministica.qmd), seção a seção.
 
 ## Arquitetura, em uma frase por peça
