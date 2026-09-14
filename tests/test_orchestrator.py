@@ -8,6 +8,7 @@ rodar -> verificar -> logar).
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -180,6 +181,120 @@ def test_success_writes_report_alongside_json_log_in_mock_mode(tmp_path):
     assert report_file.exists()
     assert report_file.parent == runs_dir
     assert "[mock]" in report_file.read_text(encoding="utf-8")
+
+
+def test_checkpoint_writes_own_log_regardless_of_llm_mode(tmp_path):
+    df = _valid_input_df()
+    input_csv = tmp_path / "entrada.csv"
+    _write_input_csv(input_csv, df)
+    runs_dir = tmp_path / "runs"
+
+    result = run(
+        input_csv,
+        runs_dir=runs_dir,
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="off",
+    )
+
+    assert result.status == "success"
+    assert result.checkpoint_path is not None
+    checkpoint_data = json.loads(Path(result.checkpoint_path).read_text(encoding="utf-8"))
+    assert checkpoint_data["llm_mode_requested"] == "off"
+    assert checkpoint_data["llm_mode_effective"] == "off"
+    assert "unique_asv_count" in checkpoint_data
+
+
+def test_checkpoint_does_not_prompt_when_llm_mode_is_not_live(tmp_path):
+    calls = []
+
+    def _fake_confirm(prompt_text):
+        calls.append(prompt_text)
+        return True, "nao deveria ter sido chamado"
+
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="mock",
+        confirm_llm_stage=_fake_confirm,
+    )
+
+    assert result.status == "success"
+    assert calls == []  # so pergunta quando llm_mode == "live"
+
+
+def test_checkpoint_prompts_and_downgrades_to_off_when_declined(tmp_path):
+    def _fake_confirm(prompt_text):
+        return False, "usuario optou por pular (teste)"
+
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="live",
+        confirm_llm_stage=_fake_confirm,
+    )
+
+    assert result.status == "success"
+    assert result.llm_mode == "off"
+    checkpoint_data = json.loads(Path(result.checkpoint_path).read_text(encoding="utf-8"))
+    assert checkpoint_data["llm_mode_requested"] == "live"
+    assert checkpoint_data["llm_mode_effective"] == "off"
+    assert "pular" in checkpoint_data["decision"]
+
+
+def test_checkpoint_prompts_and_proceeds_when_confirmed(tmp_path):
+    calls = []
+
+    def _fake_confirm(prompt_text):
+        calls.append(prompt_text)
+        return True, "usuario confirmou (teste)"
+
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="live",  # fixture nao tem nenhuma ASV que precise de revisao -> sem rede real
+        confirm_llm_stage=_fake_confirm,
+    )
+
+    assert result.status == "success"
+    assert len(calls) == 1
+    assert result.llm_mode == "live"
+    assert result.llm_reviewed_count == 0  # nenhuma ASV precisou de revisao nesta fixture
+
+
+def test_checkpoint_assume_yes_skips_the_question(tmp_path):
+    calls = []
+
+    def _fake_confirm(prompt_text):
+        calls.append(prompt_text)
+        return False, "nao deveria ter sido chamado"
+
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="live",
+        confirm_llm_stage=_fake_confirm,
+        assume_yes=True,
+    )
+
+    assert result.status == "success"
+    assert calls == []
+    assert result.llm_mode == "live"
+
+
+def _write_valid_input(tmp_path: Path) -> Path:
+    df = _valid_input_df()
+    input_csv = tmp_path / "entrada.csv"
+    _write_input_csv(input_csv, df)
+    return input_csv
 
 
 def test_failed_when_r_exits_nonzero(tmp_path):

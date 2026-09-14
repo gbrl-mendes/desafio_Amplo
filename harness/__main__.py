@@ -1,8 +1,9 @@
 """Ponto de entrada do harness: `python -m harness <entrada.csv> [opcoes]`.
 
-Ve `orchestrator.run` para o fluxo completo (validar -> rodar R -> verificar
--> logar). Este modulo so cuida de argumentos de linha de comando e do
-codigo de saida do processo, que reflete o status do run:
+Ve `orchestrator.run` para o fluxo completo (resumo da entrada -> validar ->
+rodar R -> verificar -> checkpoint -> curadoria assistida -> logar). Este
+modulo so cuida de argumentos de linha de comando e do codigo de saida do
+processo, que reflete o status do run:
   0 = sucesso, 2 = entrada recusada pela validacao, 3 = falha de execucao
   (R ausente, erro no script R, verificacao pos-execucao reprovada, etc.).
 """
@@ -59,6 +60,17 @@ def build_parser() -> argparse.ArgumentParser:
             "curadoria assistida por LLM. Ver data/example/spp_tradicional.csv."
         ),
     )
+    parser.add_argument(
+        "--yes",
+        "-y",
+        dest="assume_yes",
+        action="store_true",
+        help=(
+            "Pula a pergunta do checkpoint entre a curadoria deterministica e a assistida por "
+            "LLM, prosseguindo direto com o --llm-mode configurado. Sem essa flag, num terminal "
+            "interativo com --llm-mode=live a execucao para nesse ponto e pergunta."
+        ),
+    )
     return parser
 
 
@@ -72,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         runs_dir=args.runs_dir,
         llm_mode=args.llm_mode,
         traditional_species_csv=args.traditional_species_csv,
+        assume_yes=args.assume_yes,
     )
 
     print(f"Status: {result.status}")
@@ -98,6 +111,9 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     print(f"\nSucesso. Saida em: {result.output_path}")
+
+    if result.checkpoint_path:
+        print(f"Checkpoint (metricas antes da curadoria assistida): {result.checkpoint_path}")
 
     if result.llm_mode == "off" and result.llm_skipped_reason:
         print(f"Curadoria assistida por LLM pulada: {result.llm_skipped_reason}")

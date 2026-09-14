@@ -11,15 +11,20 @@ Divisao de responsabilidades (nenhuma logica de curadoria mora aqui):
   - harness/report_generation.py  relatorio narrativo da execucao (etapa
                                    opcional, apoiada por LLM sobre agregados
                                    ja calculados).
+  - harness/progress.py           narracao verbose obrigatoria (resumo da
+                                   entrada, checkpoint) e a pergunta do
+                                   checkpoint em si.
   - harness/orchestrator.py       conecta tudo, verifica a saida e grava
                                    um log estruturado de cada run.
 
-Fluxo: valida -> (recusa se bloqueante) -> roda o R -> verifica a saida ->
-curadoria assistida por LLM (opcional) -> relatorio narrativo (opcional) ->
-loga. Cada etapa gera um "RunResult" serializavel, gravado em
-`runs/<timestamp>.json` (relatorio em `runs/<timestamp>_relatorio.md`),
-para responder depois "o que foi feito e por que" sem precisar reexecutar
-nada.
+Fluxo: resumo da entrada -> valida -> (recusa se bloqueante) -> roda o R
+(saida ao vivo) -> verifica a saida -> checkpoint (metricas + log proprio +
+pergunta se ha custo real de LLM em jogo) -> curadoria assistida por LLM
+(opcional) -> relatorio narrativo (opcional) -> loga. Cada etapa gera um
+"RunResult" serializavel, gravado em `runs/<timestamp>.json` (checkpoint em
+`runs/<timestamp>_checkpoint.json`, relatorio em
+`runs/<timestamp>_relatorio.md`), para responder depois "o que foi feito e
+por que" sem precisar reexecutar nada.
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ import glob
 import json
 import shutil
 import subprocess
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +42,13 @@ from typing import Callable, Optional
 import pandas as pd
 
 from harness.llm_curation import LlmCurationResult, load_traditional_species, run_llm_assisted_curation
+from harness.progress import (
+    ConfirmFn,
+    build_checkpoint_stats,
+    default_confirm_llm_stage,
+    format_checkpoint_summary,
+    format_input_summary,
+)
 from harness.report_generation import ReportContext, ReportGenerationResult, generate_report
 from tools.schema_validation import load_column_aliases, load_schema, validate_asv_table
 
@@ -78,6 +91,7 @@ class RunResult:
     report_path: Optional[str] = None
     report_mode: Optional[str] = None
     report_error: Optional[str] = None
+    checkpoint_path: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -111,6 +125,16 @@ def _tail(text: str, n_lines: int = 30) -> str:
 RScriptRunner = Callable[..., subprocess.CompletedProcess]
 
 
+def _stream_pipe_to_console(pipe, sink: list[str]) -> None:
+    """Le uma pipe linha a linha, imprime cada uma na hora (verbose ao vivo
+    e obrigatorio, ver harness/progress.py) e acumula pra formar o
+    r_stdout_tail/r_stderr_tail do log do run."""
+    for line in iter(pipe.readline, ""):
+        print(line, end="", flush=True)
+        sink.append(line)
+    pipe.close()
+
+
 def default_r_runner(
     rscript_exe: str,
     input_csv: Path,
@@ -124,11 +148,42 @@ def default_r_runner(
     # Nota: em alguns ambientes Windows, mensagens de console do R (cat/
     # message) podem sair com acentos corrompidos aqui (mismatch de
     # encoding entre a codepage nativa do SO e UTF-8) -- isso afeta so texto
-    # de diagnostico (r_stdout_tail/r_stderr_tail no log do run), nunca os
-    # dados da curadoria em si: o CSV de saida e sempre lido/escrito como
-    # UTF-8 (ver verify_output) e nao e afetado.
-    return subprocess.run(
-        args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
+    # de diagnostico (impresso ao vivo e no r_stdout_tail/r_stderr_tail do
+    # log), nunca os dados da curadoria em si: o CSV de saida e sempre
+    # lido/escrito como UTF-8 (ver verify_output) e nao e afetado.
+    #
+    # stdout/stderr sao transmitidos ao vivo (linha a linha, em threads
+    # separadas) em vez de capturados silenciosamente -- e assim que o
+    # usuario acompanha o progresso dos 6 blocos do R (consulta de
+    # taxonomia, GBIF, etc.) enquanto a execucao roda, nao so no final.
+    proc = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    stdout_thread = threading.Thread(target=_stream_pipe_to_console, args=(proc.stdout, stdout_lines))
+    stderr_thread = threading.Thread(target=_stream_pipe_to_console, args=(proc.stderr, stderr_lines))
+    stdout_thread.start()
+    stderr_thread.start()
+
+    try:
+        returncode = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        raise
+    finally:
+        stdout_thread.join()
+        stderr_thread.join()
+
+    return subprocess.CompletedProcess(
+        args=args, returncode=returncode, stdout="".join(stdout_lines), stderr="".join(stderr_lines)
     )
 
 
@@ -180,9 +235,23 @@ def run(
     timeout: int = 1800,
     llm_mode: str = "live",
     traditional_species_csv: str | Path | None = None,
+    confirm_llm_stage: ConfirmFn = default_confirm_llm_stage,
+    assume_yes: bool = False,
 ) -> RunResult:
-    """Executa uma rodada completa: valida -> roda o R -> verifica ->
-    curadoria assistida por LLM (opcional) -> loga.
+    """Executa uma rodada completa: resumo da entrada -> valida -> roda o R
+    (saida ao vivo) -> verifica -> checkpoint -> curadoria assistida por LLM
+    (opcional) -> loga.
+
+    `confirm_llm_stage`: injetavel de proposito, mesmo padrao de `r_runner`
+    -- os testes passam uma funcao falsa em vez de depender de stdin. O
+    default (`harness.progress.default_confirm_llm_stage`) pergunta ao
+    usuario num terminal interativo, ou prossegue sozinho (registrando o
+    motivo) se nao houver terminal esperando resposta -- nunca trava uma
+    execucao automatizada.
+
+    `assume_yes`: pula a pergunta do checkpoint e ja prossegue com o
+    `llm_mode` configurado, sem chamar `confirm_llm_stage`. Pra quem ja
+    sabe que quer rodar sem parar (ex. reexecucoes durante desenvolvimento).
 
     `config_path`: YAML opcional, repassado tal qual pro R (`--config`). Se
     trouxer a chave `colunas_alias` (nome bruto -> nome canonico), essa mesma
@@ -214,9 +283,12 @@ def run(
     started_at = datetime.now(timezone.utc).isoformat()
 
     df = pd.read_csv(input_csv, sep=";", decimal=",", encoding="utf-8")
+    print(format_input_summary(df, str(traditional_species_csv) if traditional_species_csv else None))
+
     schema = load_schema()
     column_aliases = load_column_aliases(config_path)
     report = validate_asv_table(df, schema=schema, column_aliases=column_aliases)
+    print(f"\n{report.summary()}")
 
     if not report.is_valid:
         result = RunResult(
@@ -255,6 +327,7 @@ def run(
         write_run_log(result, runs_dir)
         return result
 
+    print("\n=== Rodando curadoria deterministica (R) ===")
     try:
         proc = r_runner(resolved_rscript, input_csv, output_csv, config_path, timeout)
     except subprocess.TimeoutExpired:
@@ -279,6 +352,8 @@ def run(
 
     llm_result = None
     curated_df = None
+    checkpoint_path = None
+    effective_llm_mode = llm_mode
     if status == "success":
         try:
             traditional_species_df = (
@@ -287,8 +362,53 @@ def run(
                 else None
             )
             curated_df = pd.read_csv(output_csv, sep=";", decimal=",", encoding="utf-8")
+
+            # Checkpoint: mostra o que a curadoria deterministica encontrou,
+            # grava um log proprio desse trecho, e (so quando --llm-mode=live
+            # e ha custo/tempo real de API em jogo) pergunta se vale a pena
+            # seguir pra curadoria assistida.
+            checkpoint_stats = build_checkpoint_stats(curated_df)
+            print("\n" + format_checkpoint_summary(checkpoint_stats))
+
+            checkpoint_decision = "llm-mode != live: checkpoint nao pergunta, so registra"
+            if llm_mode == "live":
+                if assume_yes:
+                    checkpoint_decision = "assume_yes: prosseguiu sem perguntar"
+                else:
+                    prompt_text = (
+                        f"\n{checkpoint_stats['needs_review_count']} de "
+                        f"{checkpoint_stats['unique_asv_count']} sequencia(s) unica(s) vao ser "
+                        "enviadas pra Groq na curadoria assistida."
+                    )
+                    proceed, checkpoint_decision = confirm_llm_stage(prompt_text)
+                    if not proceed:
+                        effective_llm_mode = "off"
+
+            checkpoint_timestamp = started_at.replace(":", "-").replace("+00-00", "Z")
+            checkpoint_file = runs_dir / f"{checkpoint_timestamp}_checkpoint.json"
+            checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+            checkpoint_file.write_text(
+                json.dumps(
+                    {
+                        **checkpoint_stats,
+                        "llm_mode_requested": llm_mode,
+                        "llm_mode_effective": effective_llm_mode,
+                        "decision": checkpoint_decision,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            checkpoint_path = str(checkpoint_file)
+
+            if effective_llm_mode != llm_mode:
+                print(f"\n=== Curadoria assistida por LLM pulada no checkpoint ({checkpoint_decision}) ===")
+            else:
+                print("\n=== Curadoria assistida por LLM ===")
+
             curated_df, llm_result = run_llm_assisted_curation(
-                curated_df, mode=llm_mode, traditional_species_df=traditional_species_df
+                curated_df, mode=effective_llm_mode, traditional_species_df=traditional_species_df
             )
             curated_df.to_csv(output_csv, sep=";", decimal=",", index=False, encoding="utf-8")
         except Exception as exc:
@@ -312,7 +432,8 @@ def run(
                 llm_errors=llm_result.errors,
                 llm_skipped_reason=llm_result.skipped_reason,
             )
-            report_text, report_result = generate_report(curated_df, report_context, mode=llm_mode)
+            print("\n=== Gerando relatorio narrativo ===")
+            report_text, report_result = generate_report(curated_df, report_context, mode=effective_llm_mode)
         except Exception as exc:
             # Mesma logica de protecao acima: uma falha inesperada na geracao
             # do relatorio nao invalida a curadoria ja concluida e verificada.
@@ -346,6 +467,7 @@ def run(
         report_path=report_path,
         report_mode=report_result.mode if report_result else None,
         report_error=report_result.error if report_result else None,
+        checkpoint_path=checkpoint_path,
     )
     write_run_log(result, runs_dir)
     return result

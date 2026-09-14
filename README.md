@@ -35,6 +35,14 @@ pip install -r requirements.txt
 Rscript r/install_packages.R
 ```
 
+No Windows, se `.venv\Scripts\activate` recusar rodar com "running scripts is disabled on this system", a política de execução do PowerShell está bloqueando o script. Rode antes, na mesma sessão do terminal:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+```
+
+Vale só para essa sessão, não precisa de administrador.
+
 ## Execução
 
 ```bash

@@ -207,6 +207,7 @@ compute_derived_local_columns <- function(df) {
 }
 
 run_setup_parsing <- function(input_path, config = DEFAULT_CONFIG, schema = read_schema()) {
+  cat("\n[1/6] Setup e parsing: lendo o CSV, aplicando alias de colunas, checando estrutura...\n")
   df <- read_asv_table(input_path)
   df <- apply_column_aliases(df, config$colunas_alias)
   check_required_columns(df, schema)
@@ -282,6 +283,7 @@ clean_species_names <- function(df) {
 }
 
 run_blast_refinement <- function(df) {
+  cat("\n[2/6] Refinamento dos hits de BLAST: escolhendo o melhor hit por sequencia...\n")
   df %>%
     select_best_blast_hit() %>%
     clean_species_names()
@@ -515,6 +517,7 @@ flag_contamination <- function(df, fold_change_threshold = 10) {
 }
 
 run_taxonomy_and_contamination <- function(df, config = DEFAULT_CONFIG, entrez_key = NULL) {
+  cat("\n[3/6] Taxonomia NCBI + contaminacao: consultando taxonomia e calculando Fold Change...\n")
   df <- run_taxonomy_lookup(df, entrez_key = entrez_key)
   flag_contamination(df, fold_change_threshold = config$contaminacao$fold_change_threshold)
 }
@@ -656,6 +659,7 @@ flag_target_taxa <- function(df, grupos, registry = TARGET_TAXA_REGISTRY) {
 }
 
 run_final_curation <- function(df, config = DEFAULT_CONFIG) {
+  cat("\n[4/6] Curadoria final: faixa de amplicon, pseudo-score e taxons-alvo...\n")
   df %>%
     flag_amplicon_length(config$amplicon_por_primer) %>%
     compute_pseudoscore_and_identification(config$identificacao$pseudoscore_thresholds) %>%
@@ -723,6 +727,7 @@ extract_k_neighbors <- function(tree, k = 5) {
 }
 
 run_phylogenetic_tree <- function(df, config = DEFAULT_CONFIG) {
+  cat("\n[5/6] Arvore filogenetica: alinhando sequencias e calculando vizinhos mais proximos...\n")
   tree <- build_asv_tree(df, config$amplicon_por_primer)
   neighbors <- extract_k_neighbors(tree, k = config$arvore_filogenetica$k_vizinhos)
 
@@ -781,6 +786,7 @@ gbif_regional_count <- function(scientific_name, wkt, verbose = TRUE) {
 }
 
 run_regional_check <- function(df, config = DEFAULT_CONFIG) {
+  cat("\n[6/6] Checagem regional GBIF: consultando ocorrencia por especie...\n")
   if (!identical(config$checagem_regional$fonte, "gbif")) {
     warning(
       "checagem_regional$fonte != 'gbif' -- checagem regional pulada ",
