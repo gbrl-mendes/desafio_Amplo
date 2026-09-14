@@ -71,12 +71,12 @@ columns:
   - {name: "ASV (Sequence)", role: input, required: true}
   - {name: "Sequence (ASV tip)", role: input, required: false}
 
-  # --- Controles (necessários para a tool de contaminação) ---
+  # --- Controles de contaminacao ---
   - {name: "Ext. Control", role: input, required: false}
   - {name: "PCR Control", role: input, required: false}
   - {name: "Filt. Control", role: input, required: false}
 
-  # --- Hits brutos de BLAST (3 hits x ~14 campos cada) — a matéria-prima real ---
+  # --- Hits brutos de BLAST ---
   - {name: "1_subject header", role: input, required: true}
   - {name: "1_staxid", role: input, required: true}
   - {name: "1_subject", role: input, required: true}
@@ -119,32 +119,6 @@ columns:
   - {name: "3_subject end", role: input, required: false}
   - {name: "3_e-value", role: input, required: false}
   - {name: "3_bitscore", role: input, required: false}
-
-  # --- Derivadas por um pipeline diferente do nosso — excluídas do input ---
-  - {name: "BLASTn pseudo-score", role: derived_recompute}
-  - {name: "Identification", role: derived_recompute}
-  - {name: "Identification Max. taxonomy", role: derived_recompute}
-  - {name: "Primer expected length", role: derived_recompute}
-  - {name: "Possible Metazoa", role: derived_recompute}
-  - {name: "Final ID (BLASTn)", role: derived_recompute}
-  - {name: "blast ID Origin", role: derived_recompute}
-  - {name: "ID status", role: derived_recompute}
-  - {name: "Contamination status", role: derived_recompute}
-  - {name: "BLAST ID", role: derived_recompute}
-  - {name: "Genus (NCBI)", role: derived_recompute}
-  - {name: "Subfamily (NCBI)", role: derived_recompute}
-  - {name: "Family (NCBI)", role: derived_recompute}
-  - {name: "Suborder (NCBI)", role: derived_recompute}
-  - {name: "Order (NCBI)", role: derived_recompute}
-  - {name: "Subclass (NCBI)", role: derived_recompute}
-  - {name: "Class (NCBI)", role: derived_recompute}
-  - {name: "Phylum (NCBI)", role: derived_recompute}
-  - {name: "Subphylum (NCBI)", role: derived_recompute}
-  - {name: "Kingdom (NCBI)", role: derived_recompute}
-  - {name: "Superkingdom (NCBI)", role: derived_recompute}
-  - {name: "Prop. to PCR control", role: derived_recompute}
-  - {name: "Prop. to Ext control", role: derived_recompute}
-  - {name: "Prop. to Filt control", role: derived_recompute}
 
   # --- Gabarito, excluído do input da LLM ---
   - {name: "Curated ID", role: gabarito}
