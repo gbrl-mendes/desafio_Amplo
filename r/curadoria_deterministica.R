@@ -40,19 +40,30 @@ if (!identical(normalizePath(getwd()), normalizePath(REPO_ROOT))) {
 }
 
 DEFAULT_CONFIG <- list(
-  metadados = list(
-    # Mapeia o nome bruto de cada coluna de metadado (como chega no CSV)
-    # para o nome semantico esperado pelo resto do pipeline. Colunas de
-    # latitude e longitude devem ser mapeadas exatamente para
-    # "Latitude"/"Longitude": e nessas colunas que a correcao de escala
-    # (grau decimal codificado como inteiro, dividido por 1e6) e aplicada.
-    colunas = c(
-      "Metadata 1" = "Ponto",
-      "Metadata 8" = "Latitude",
-      "Metadata 9" = "Longitude",
-      "Metadata 10" = "Habitat",
-      "Metadata 11" = "Rios"
-    )
+  # Mapeia o nome bruto de qualquer coluna (como chega no CSV de um projeto
+  # especifico) para o nome canonico que o resto do pipeline usa -- inclui
+  # tanto colunas obrigatorias (Researcher, Project, Sample, os campos de
+  # cada hit do BLAST, etc.) quanto as semanticas opcionais de metadado
+  # (Ponto/Latitude/Longitude/Habitat/Rios). So precisa declarar aqui o que
+  # de fato for diferente do canonico no seu arquivo -- o que nao for
+  # declarado e assumido ja canonico. Colunas de latitude/longitude devem
+  # ser mapeadas exatamente para "Latitude"/"Longitude": e nessas colunas
+  # que a correcao de escala (grau decimal codificado como inteiro,
+  # dividido por 1e6) e aplicada.
+  #
+  # O default abaixo so cobre o que o dataset de demonstracao deste projeto
+  # (eDNA_Cipo) precisa -- os slots de metadado generico (Metadata N) nao
+  # tem nome semantico proprio no CSV bruto, entao precisam ser mapeados
+  # mesmo para o dado de demonstracao. Os campos obrigatorios (Researcher,
+  # Project, hits do BLAST, etc.) ja vem com nome canonico nesse dataset,
+  # entao nao aparecem aqui -- mas podem ser sobrescritos via --config para
+  # outro projeto que use nomes diferentes.
+  colunas_alias = c(
+    "Metadata 1" = "Ponto",
+    "Metadata 8" = "Latitude",
+    "Metadata 9" = "Longitude",
+    "Metadata 10" = "Habitat",
+    "Metadata 11" = "Rios"
   ),
   contaminacao = list(
     fold_change_threshold = 10
@@ -127,20 +138,24 @@ read_asv_table <- function(path) {
   )
 }
 
-rename_metadata_columns <- function(df, colunas) {
-  rename_map <- colunas
+apply_column_aliases <- function(df, colunas_alias) {
+  rename_map <- colunas_alias
 
   present <- rename_map[names(rename_map) %in% colnames(df)]
   absent <- rename_map[!names(rename_map) %in% colnames(df)]
   if (length(absent) > 0) {
     warning(sprintf(
-      "Coluna(s) de metadado ausente(s), renomeacao pulada: %s",
+      "Coluna(s) declarada(s) em colunas_alias mas ausente(s) do arquivo, renomeacao pulada: %s",
       paste(names(absent), collapse = ", ")
     ), call. = FALSE)
   }
 
-  df <- dplyr::rename(df, !!!setNames(names(present), present))
+  if (length(present) > 0) {
+    df <- dplyr::rename(df, !!!setNames(names(present), present))
+  }
 
+  # Vem como inteiro (ex. -19420314); consulta geografica (GBIF, bloco 6)
+  # exige grau decimal.
   if ("Latitude" %in% colnames(df)) {
     df$Latitude <- as.numeric(df$Latitude) / 1e6
   }
@@ -189,10 +204,10 @@ compute_derived_local_columns <- function(df) {
 
 run_setup_parsing <- function(input_path, config = DEFAULT_CONFIG, schema = read_schema()) {
   df <- read_asv_table(input_path)
+  df <- apply_column_aliases(df, config$colunas_alias)
   check_required_columns(df, schema)
 
   df <- df %>%
-    rename_metadata_columns(config$metadados$colunas) %>%
     compute_derived_local_columns()
 
   df

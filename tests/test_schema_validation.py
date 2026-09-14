@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.schema_validation import load_schema, validate_asv_table
+from tools.schema_validation import load_column_aliases, load_schema, validate_asv_table
 
 SCHEMA = load_schema()
 
@@ -105,6 +105,52 @@ def test_out_of_scope_column_present_is_only_a_warning():
     assert report.is_valid
     codes = [i.code for i in report.warnings]
     assert "out_of_scope_columns_present" in codes
+
+
+def test_column_aliases_let_a_table_with_different_raw_names_pass():
+    # Same table as test_valid_table_passes, but "Researcher" arrives under
+    # a project-specific raw name -- without the alias this would fail
+    # missing_required_columns.
+    df = _base_valid_df().rename(columns={"Researcher": "Pesquisador"})
+    report = validate_asv_table(df, schema=SCHEMA, column_aliases={"Pesquisador": "Researcher"})
+    assert report.is_valid, report.summary()
+
+
+def test_column_aliases_do_not_mutate_caller_dataframe():
+    df = _base_valid_df().rename(columns={"Researcher": "Pesquisador"})
+    validate_asv_table(df, schema=SCHEMA, column_aliases={"Pesquisador": "Researcher"})
+    assert "Pesquisador" in df.columns  # renamed on a copy, not the original
+
+
+def test_column_alias_raw_name_missing_is_a_warning_not_blocking():
+    df = _base_valid_df()
+    report = validate_asv_table(df, schema=SCHEMA, column_aliases={"Nome_Que_Nao_Existe": "Researcher"})
+    assert report.is_valid, report.summary()
+    codes = [i.code for i in report.warnings]
+    assert "column_alias_raw_name_not_found" in codes
+
+
+def test_load_column_aliases_without_config_returns_the_default_baseline():
+    # Sem --config, Python precisa aplicar o mesmo default que o R aplica
+    # sozinho (DEFAULT_CONFIG$colunas_alias) -- senao uma execucao sobre o
+    # dado de demonstracao passaria no R mas seria recusada aqui.
+    aliases = load_column_aliases(None)
+    assert aliases["Metadata 1"] == "Ponto"
+    assert aliases["Metadata 8"] == "Latitude"
+
+
+def test_load_column_aliases_user_config_overrides_default_baseline(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("colunas_alias:\n  Pesquisador: Researcher\n", encoding="utf-8")
+    aliases = load_column_aliases(config_path)
+    assert aliases["Pesquisador"] == "Researcher"
+    assert aliases["Metadata 1"] == "Ponto"  # baseline continua presente
+
+
+def test_load_column_aliases_missing_key_keeps_default_baseline(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("contaminacao:\n  fold_change_threshold: 5\n", encoding="utf-8")
+    assert load_column_aliases(config_path) == load_column_aliases(None)
 
 
 if __name__ == "__main__":

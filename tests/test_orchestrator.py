@@ -96,6 +96,41 @@ def test_success_when_valid_input_and_r_succeeds(tmp_path):
     assert output_csv.exists()
 
 
+def test_refused_when_required_column_renamed_without_alias_config(tmp_path):
+    # Sanity check for the next test: without colunas_alias, a renamed
+    # required column really does get refused (proves the alias mechanism
+    # is doing something, not that validation was already lenient).
+    df = _valid_input_df().rename(columns={"Researcher": "Pesquisador"})
+    input_csv = tmp_path / "entrada.csv"
+    _write_input_csv(input_csv, df)
+
+    result = run(input_csv, runs_dir=tmp_path / "runs")
+
+    assert result.status == "refused"
+    assert any("missing_required_columns" in b for b in result.validation_blocking)
+
+
+def test_column_aliases_from_config_let_renamed_input_pass(tmp_path):
+    df = _valid_input_df().rename(columns={"Researcher": "Pesquisador"})
+    input_csv = tmp_path / "entrada.csv"
+    _write_input_csv(input_csv, df)
+    output_csv = tmp_path / "saida.csv"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("colunas_alias:\n  Pesquisador: Researcher\n", encoding="utf-8")
+
+    result = run(
+        input_csv,
+        config_path=config_path,
+        output_csv=output_csv,
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner,
+        rscript_exe="rscript-fake",
+        llm_mode="off",
+    )
+
+    assert result.status == "success", result.validation_summary
+
+
 def _fake_success_runner_with_evidence(rscript_exe, input_csv, output_csv, config_path, timeout):
     """Como `_fake_success_runner`, mas com as colunas de evidencia que
     harness.llm_curation e harness.report_generation esperam -- necessarias

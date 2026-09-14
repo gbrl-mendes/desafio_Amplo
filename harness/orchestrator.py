@@ -37,7 +37,7 @@ import pandas as pd
 
 from harness.llm_curation import LlmCurationResult, load_traditional_species, run_llm_assisted_curation
 from harness.report_generation import ReportContext, ReportGenerationResult, generate_report
-from tools.schema_validation import load_schema, validate_asv_table
+from tools.schema_validation import load_column_aliases, load_schema, validate_asv_table
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 R_SCRIPT_PATH = REPO_ROOT / "r" / "curadoria_deterministica.R"
@@ -184,6 +184,13 @@ def run(
     """Executa uma rodada completa: valida -> roda o R -> verifica ->
     curadoria assistida por LLM (opcional) -> loga.
 
+    `config_path`: YAML opcional, repassado tal qual pro R (`--config`). Se
+    trouxer a chave `colunas_alias` (nome bruto -> nome canonico), essa mesma
+    tradução também é aplicada aqui do lado Python antes de validar -- assim
+    uma tabela com nomes de coluna diferentes do canônico (outro projeto,
+    mesmo conceito) ainda passa pela checagem de colunas obrigatórias em vez
+    de ser recusada por causa do nome.
+
     `r_runner` e injetavel de proposito -- os testes passam um runner falso
     pra nao depender de R instalado nem de rede (NCBI/GBIF) pra verificar a
     logica de orquestracao em si.
@@ -208,7 +215,8 @@ def run(
 
     df = pd.read_csv(input_csv, sep=";", decimal=",", encoding="utf-8")
     schema = load_schema()
-    report = validate_asv_table(df, schema=schema)
+    column_aliases = load_column_aliases(config_path)
+    report = validate_asv_table(df, schema=schema, column_aliases=column_aliases)
 
     if not report.is_valid:
         result = RunResult(

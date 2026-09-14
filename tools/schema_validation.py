@@ -22,6 +22,12 @@ Three kinds of problems are checked:
 The output is a :class:`ValidationReport` that a harness can act on: BLOCKING
 issues should stop the run (a "refusal"), WARNING issues should be surfaced
 but do not have to stop execution.
+
+Column names are allowed to vary between projects (each may name the same
+concept differently): an optional `column_aliases` map (raw name -> canonical
+name, read from the same `--config` YAML the R pipeline uses, see
+``load_column_aliases``) is applied before any check below, so what "required
+columns" means is judged against canonical names, not literal ones.
 """
 
 from __future__ import annotations
@@ -36,6 +42,21 @@ import yaml
 DEFAULT_SCHEMA_PATH = (
     Path(__file__).resolve().parent.parent / "data" / "reference" / "asv_input_schema.yaml"
 )
+
+# Mesmo baseline de `DEFAULT_CONFIG$colunas_alias` em
+# r/curadoria_deterministica.qmd -- precisa ficar em sincronia com aquele,
+# porque o R nao expõe o proprio default num arquivo que o Python possa ler.
+# Sem isso, uma execucao sem `--config` passaria no lado R (que aplica seu
+# proprio default) mas seria recusada aqui (Python nao veria "Metadata 1"
+# como "Ponto"). Um `--config` de usuario sobrescreve so as chaves que trouxer
+# (mesmo merge raso que `modifyList` faz do lado R).
+DEFAULT_COLUMN_ALIASES: dict[str, str] = {
+    "Metadata 1": "Ponto",
+    "Metadata 8": "Latitude",
+    "Metadata 9": "Longitude",
+    "Metadata 10": "Habitat",
+    "Metadata 11": "Rios",
+}
 
 IssueLevel = Literal["blocking", "warning"]
 
@@ -84,11 +105,31 @@ def load_schema(schema_path: str | Path = DEFAULT_SCHEMA_PATH) -> dict:
         return yaml.safe_load(fh)
 
 
+def load_column_aliases(config_path: str | Path | None) -> dict[str, str]:
+    """Le o mapa `colunas_alias` (nome bruto -> nome canonico) de um YAML de
+    config, o mesmo arquivo passado via `--config` pro R (`DEFAULT_CONFIG` em
+    curadoria_deterministica.qmd), por cima do baseline em
+    ``DEFAULT_COLUMN_ALIASES``. Sem config, retorna so o baseline -- mesmo
+    default que o R aplica sozinho, para as duas linguagens se comportarem
+    igual sobre o dado de demonstracao mesmo sem `--config`."""
+    aliases = dict(DEFAULT_COLUMN_ALIASES)
+    if config_path is None:
+        return aliases
+    with open(config_path, encoding="utf-8") as fh:
+        user_config = yaml.safe_load(fh) or {}
+    aliases.update(user_config.get("colunas_alias") or {})
+    return aliases
+
+
 def _columns_by_role(schema: dict, role: str) -> list[str]:
     return [c["name"] for c in schema["columns"] if c["role"] == role]
 
 
-def validate_asv_table(df: pd.DataFrame, schema: dict | None = None) -> ValidationReport:
+def validate_asv_table(
+    df: pd.DataFrame,
+    schema: dict | None = None,
+    column_aliases: dict[str, str] | None = None,
+) -> ValidationReport:
     """Validate an ASV table against the input schema contract.
 
     Parameters
@@ -97,11 +138,35 @@ def validate_asv_table(df: pd.DataFrame, schema: dict | None = None) -> Validati
         The raw ASV table exactly as it would be handed to the agent.
     schema:
         Pre-loaded schema dict. If omitted, loads ``DEFAULT_SCHEMA_PATH``.
+    column_aliases:
+        Optional map of raw column name -> canonical column name (same
+        `colunas_alias` config the R pipeline applies -- see
+        ``load_column_aliases``). Applied to a copy of ``df`` before any
+        other check, so a table whose columns aren't already named
+        canonically can still pass validation. An alias whose raw name
+        isn't present in ``df`` is reported as a warning, not silently
+        ignored, so a typo in the config is visible without reading logs.
     """
     if schema is None:
         schema = load_schema()
 
     report = ValidationReport()
+
+    if column_aliases:
+        present_aliases = {raw: canonical for raw, canonical in column_aliases.items() if raw in df.columns}
+        absent_aliases = [raw for raw in column_aliases if raw not in df.columns]
+        if absent_aliases:
+            report.add(
+                level="warning",
+                code="column_alias_raw_name_not_found",
+                message=(
+                    "Coluna(s) declarada(s) em colunas_alias mas ausente(s) da tabela de "
+                    "entrada -- renomeação pulada para elas."
+                ),
+                details=absent_aliases,
+            )
+        if present_aliases:
+            df = df.rename(columns=present_aliases)
 
     required_input_cols = [c["name"] for c in schema["columns"] if c["role"] == "input" and c.get("required")]
     leakage_cols = _columns_by_role(schema, "derived_recompute") + _columns_by_role(schema, "gabarito")

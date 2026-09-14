@@ -41,7 +41,7 @@ columns:
   - {name: "Primer", role: input, required: true}
   - {name: "Sample", role: input, required: true}
   - {name: "Unique_File_name", role: input, required: true}
-  - {name: "Read origin", role: input, required: false}
+  - {name: "Read origin", role: input, required: true}
   - {name: "obs", role: input, required: false}
   - {name: "Type", role: input, required: true}
 
@@ -53,8 +53,14 @@ columns:
   - {name: "ASV absolute abundance", role: input, required: true}
   - {name: "ASV clean abs. abd.", role: input, required: false}
 
+  # --- Ponto amostral: obrigatorio como conceito (Ponto), nao como nome bruto.
+  # No dataset de demonstracao chega como "Metadata 1" e e traduzido para
+  # "Ponto" por colunas_alias (aplicado antes desta checagem) -- outro projeto
+  # pode ja trazer uma coluna chamada "Ponto" diretamente, sem alias nenhum.
+  - {name: "Ponto", role: input, required: true}
+
   # --- Metadados de amostra (Metadata 1-12: automaticamente extraídos do nome da amostra) ---
-  - {name: "Metadata 1", role: input, required: true}
+  - {name: "Metadata 1", role: input, required: false}
   - {name: "Metadata 2", role: input, required: false}
   - {name: "Metadata 3", role: input, required: false}
   - {name: "Metadata 4", role: input, required: false}
