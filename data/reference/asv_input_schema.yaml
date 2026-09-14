@@ -1,46 +1,37 @@
-# Contrato de schema da tabela de ASVs — pós-DADA2, pós-BLASTr
+# Contrato de schema da tabela de sequências de DNA (ASVs), pós-pipeline de bioinformática.
 #
-# Gerado a partir do cabeçalho REAL da planilha mestre do projeto eDNA_cipo
-# (aba "Resultados completos" de eDNA_Cipo--Complete_results-2025-09-17.xlsx),
-# não de memória — para evitar inventar nomes de coluna incorretos.
-#
-# Cada coluna do arquivo real cai em um de cinco papéis:
+# Cada coluna cai em um de cinco papéis:
 #
 #   input             -> dado bruto ou metadado de amostra. É o que o sistema
 #                        recebe como entrada e pode/deve usar.
-#   derived_local     -> NÃO vem no CSV bruto do BLASTr (só existia na planilha
-#                        mestre, calculada por um processo externo). É
-#                        recomputada localmente, sempre, a partir de colunas
-#                        `input`, no bloco de setup/parsing do
-#                        curadoria_deterministica.R — não é exigida na entrada
-#                        e não é tratada como vazamento se vier presente
-#                        (é só um dado estrutural simples — tamanho de
-#                        sequência, soma de abundância —, não um julgamento de
-#                        curadoria nem uma fórmula concorrente).
-#   derived_recompute -> já vem calculado na planilha mestre, mas por um
-#                        pipeline DIFERENTE do que estamos portando (fórmulas
-#                        de pseudo-score/contaminação distintas). O sistema
-#                        deve calcular sua PRÓPRIA versão a partir das colunas
-#                        `input`, então esta coluna NUNCA deve estar presente
-#                        no arquivo de entrada do agente — se estiver, é sinal
-#                        de vazamento (o agente poderia copiar em vez de
-#                        derivar) e a validação deve recusar.
-#   gabarito          -> decisão humana de curadoria (Curated ID / Obs.
-#                        Curadoria). Nunca fica no input; comparação é feita
-#                        externamente pelo Gabriel, fora deste repositório.
-#   out_of_scope      -> fora do escopo do sistema por decisão explícita
-#                        (ex.: OTU/SWARM clustering).
 #
-# Este arquivo é o contrato editável: se uma categorização estiver errada,
-# ajuste aqui em vez de mexer na lógica das tools.
-
-source_reference: "eDNA_Cipo--Complete_results-2025-09-17.xlsx (aba: Resultados completos)"
-
-# A tabela é long-format: uma linha por combinação ASV x amostra, não uma
-# linha por ASV única. "ASV (Sequence)" sozinha se repete por amostra (cada
-# ASV real aparece em várias amostras) — confirmado contra o CSV real de
-# 2026-09-12 (82 valores de ASV (Sequence) duplicados quando tratada como
-# chave única). A chave real é composta.
+#   derived_local     -> não vem no CSV bruto do BLASTr, mas é recomputada
+#                        localmente, sempre, a partir de colunas `input`, no
+#                        bloco de setup/parsing do curadoria_deterministica.R
+#                        (tamanho de sequência, soma de abundância). Não é
+#                        exigida na entrada e não é tratada como vazamento se
+#                        vier presente: é só um dado estrutural simples, não
+#                        um julgamento de curadoria.
+#
+#   derived_recompute -> coluna que outro pipeline, de outro projeto, já
+#                        calculou antes com fórmula diferente da nossa
+#                        (pseudo-score, contaminação, taxonomia completa). Se
+#                        aparecer no arquivo de entrada, é sinal de que
+#                        alguém está entregando uma tabela já enriquecida em
+#                        vez da tabela bruta esperada. A validação recusa a
+#                        execução nesse caso: o sistema deve calcular sua
+#                        própria versão a partir das colunas `input`, nunca
+#                        copiar um valor pronto.
+#
+#   gabarito          -> decisão humana de curadoria (Curated ID / Obs.
+#                        Curadoria). Nunca fica no input; a comparação com
+#                        esse gabarito é feita fora deste repositório.
+#
+#   out_of_scope      -> fora do escopo do sistema por decisão explícita
+#
+# A tabela de input é long-format: uma linha por combinação de sequência (ASV)
+# e amostra, não uma linha por sequência única. A mesma sequência aparece em
+# várias amostras diferentes, então a chave primária é composta.
 primary_key: ["ASV (Sequence)", "Unique_File_name"]
 
 columns:
@@ -129,20 +120,7 @@ columns:
   - {name: "3_e-value", role: input, required: false}
   - {name: "3_bitscore", role: input, required: false}
 
-  # --- Calculadas localmente no setup/parsing do curadoria_deterministica.R ---
-  # (não vêm no CSV bruto do BLASTr; ausentes é o esperado, não um erro)
-  #   ASV Size (pb)          = nchar(`ASV (Sequence)`)
-  #   Sample total abundance = soma de `ASV absolute abundance` agrupada por
-  #                            `Sample` (idêntico a Unique_File_name aqui)
-  #   ASV header             = ">ASV_{posição}-{tamanho}bp", onde posição é o
-  #                            rank da ASV após deduplicar por sequência única
-  #                            e ordenar por tamanho decrescente (ex.:
-  #                            ">ASV_2422-168bp")
-  - {name: "ASV Size (pb)", role: derived_local, required: false}
-  - {name: "Sample total abundance", role: derived_local, required: false}
-  - {name: "ASV header", role: derived_local, required: false}
-
-  # --- Derivadas pelo pipeline ORIGINAL (fórmula diferente da nossa) — excluídas do input ---
+  # --- Derivadas por um pipeline diferente do nosso — excluídas do input ---
   - {name: "BLASTn pseudo-score", role: derived_recompute}
   - {name: "Identification", role: derived_recompute}
   - {name: "Identification Max. taxonomy", role: derived_recompute}
@@ -168,7 +146,7 @@ columns:
   - {name: "Prop. to Ext control", role: derived_recompute}
   - {name: "Prop. to Filt control", role: derived_recompute}
 
-  # --- Gabarito (nunca no input do agente) ---
+  # --- Gabarito, excluído do input da LLM ---
   - {name: "Curated ID", role: gabarito}
   - {name: "Obs. Curadoria", role: gabarito}
 
@@ -176,8 +154,8 @@ columns:
   - {name: "OTU", role: out_of_scope}
 
 # Colunas cujo valor pode conter múltiplos controles separados por ";" numa
-# única célula — bug real documentado no pipeline roots_metabar, que quebra a
-# suposição de "um controle por categoria" num join simples. A tool de
+# única célula, bug real documentado no pipeline de referência, que quebra a
+# suposição de "um controle por categoria" num cruzamento simples. A tool de
 # validação deve sinalizar isso explicitamente em vez de deixar passar
 # silenciosamente.
 multi_value_control_columns:
