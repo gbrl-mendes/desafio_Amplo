@@ -1,5 +1,5 @@
 ---
-title: "Curadoria Taxonômica Determinística desafio_Amplo"
+title: "Curadoria Determinística desafio_Amplo"
 author: "Gabriel Mendes"
 format: html
 editor: visual
@@ -10,7 +10,7 @@ chunk_output_type: console
 
 # Curadoria Determinística de ASVs
 
-Este documento descreve, em blocos, a curadoria taxonômica determinística da tabela de ASVs do projeto **desafio_Amplo**. Nenhuma etapa aqui depende de interpretação de um LLM — tudo é reproduzível a partir de parâmetros declarados em configuração (YAML), com os defaults documentados ao longo deste documento, seção a seção.
+Este documento descreve, em blocos, a curadoria taxonômica determinística da tabela de ASVs do projeto **desafio_Amplo**. Nenhuma etapa aqui depende de interpretação de um LLM, já que tudo aqui é reproduzível a partir de parâmetros declarados em configuração (YAML), com os defaults documentados ao longo deste documento, seção a seção.
 
 **Uso via linha de comando:**
 
@@ -18,7 +18,7 @@ Este documento descreve, em blocos, a curadoria taxonômica determinística da t
 Rscript curadoria_deterministica.R <entrada.csv> [--config=config.yaml] [--output=saida.csv]
 ```
 
-**Uso interativo (RStudio/Positron):** abra o `.R` equivalente e rode `source()` (ou execute por seções com Ctrl+Enter) — o `if (!interactive())` no fim impede que `main()` rode sozinho, então as funções deste documento ficam disponíveis para chamar uma a uma e inspecionar o resultado no Data Explorer.
+**Uso interativo (RStudio/Positron):** abra o `.R` equivalente e rode `source()` (ou execute por seções com Ctrl+Enter); o `if (!interactive())` no fim impede que `main()` rode sozinho, então as funções deste documento ficam disponíveis para chamar uma a uma e inspecionar o resultado no Data Explorer.
 
 Os blocos estão organizados assim:
 
@@ -56,7 +56,7 @@ Os blocos estão organizados assim:
 
 ### Localização do repositório
 
-- **Resolver a raiz do repo e fixar o diretório de trabalho.** Funciona tanto rodando via `Rscript` quanto de dentro do RStudio/Positron (onde não há `--file=` em `commandArgs`). Além de localizar o schema, também chama `setwd(REPO_ROOT)` — sem isso, caminhos relativos passados na CLI (`data/example/...`) só resolviam corretamente quando a sessão já tinha sido aberta na raiz do repo por acaso; abrir o `.qmd`/`.R` de dentro do Positron normalmente deixa o diretório de trabalho em outro lugar (ex. a pasta pessoal do usuário), quebrando qualquer caminho relativo passado pro script.
+- **Resolver a raiz do repo e fixar o diretório de trabalho.** Funciona via `Rscript` ou de dentro do RStudio/Positron, e fixa `setwd(REPO_ROOT)` para que caminhos relativos (`data/example/...`) resolvam de forma consistente.
 
   ```{r}
   get_repo_root <- function() {
@@ -84,9 +84,7 @@ Os blocos estão organizados assim:
 
 ### Configuração
 
-A lista abaixo reúne os parâmetros configuráveis do pipeline, com valores default para o projeto atual. Qualquer override deve vir de `--config`, nunca editado direto aqui.
-
-- **Defaults de configuração.**
+- **Defaults de configuração.** Parâmetros do pipeline com valores default para este projeto. Override via `--config`, não editando aqui.
 
   ```{r}
   DEFAULT_CONFIG <- list(
@@ -133,7 +131,7 @@ A lista abaixo reúne os parâmetros configuráveis do pipeline, com valores def
   )
   ```
 
-- **Função de carregamento.** Junta os defaults com um YAML de usuário (merge recursivo via `modifyList`; só sobrescreve as chaves que o YAML de fato traz).
+- **Função de carregamento.** Une os defaults com um YAML de usuário (merge recursivo via `modifyList`; só sobrescreve as chaves que o YAML de fato traz).
 
   ```{r}
   load_config <- function(config_path = NULL, defaults = DEFAULT_CONFIG) {
@@ -198,11 +196,11 @@ A validação completa (colunas obrigatórias, vazamento, chave primária) é re
   }
   ```
 
-## 2. Bloco 1 — Setup & Parsing
+## 2. Bloco 1: Setup & Parsing
 
 ### Parsing de metadados
 
-- **Renomear colunas de metadados.** Renomeia as colunas brutas de metadado para os nomes semânticos esperados pelo pipeline, de acordo com o mapeamento declarado em `config$metadados$colunas`, e corrige `Latitude`/`Longitude`, que costumam vir como inteiro (ex. `-19420314`) em vez de grau decimal — dividir por `1e6` dá o valor real (`-19.420314`). Sem essa correção qualquer consulta geográfica (GBIF, bloco 6) quebra silenciosamente. Colunas ausentes no mapeamento são puladas com aviso em vez de erro.
+- **Renomear colunas de metadados.** Renomeia colunas brutas de metadado para os nomes semânticos usados pelo pipeline (`config$metadados$colunas`) e converte `Latitude`/`Longitude` de inteiro para grau decimal (÷1e6).
 
   ```{r}
   rename_metadata_columns <- function(df, colunas) {
@@ -219,6 +217,8 @@ A validação completa (colunas obrigatórias, vazamento, chave primária) é re
 
     df <- dplyr::rename(df, !!!setNames(names(present), present))
 
+    # Vem como inteiro (ex. -19420314); consulta geografica (GBIF, bloco 6)
+    # exige grau decimal.
     if ("Latitude" %in% colnames(df)) {
       df$Latitude <- as.numeric(df$Latitude) / 1e6
     }
@@ -230,8 +230,6 @@ A validação completa (colunas obrigatórias, vazamento, chave primária) é re
   ```
 
 ### Colunas calculadas localmente
-
-Estas colunas não vêm no CSV bruto (só existiam na planilha mestre, calculadas historicamente por um processo externo ao pipeline) — são recalculadas aqui sempre, nunca aceitas vindas do input (ver `role: derived_local` no contrato de schema).
 
 - **Tamanho do amplicon.** `ASV Size (pb)` = número de bases da sequência da ASV. Piso de entrada para o filtro de `amplicon_por_primer` (bloco 4) e para a árvore filogenética (bloco 5).
 
@@ -251,7 +249,7 @@ Estas colunas não vêm no CSV bruto (só existiam na planilha mestre, calculada
   }
   ```
 
-- **Header da ASV.** Formato `">ASV_{posicao}-{tamanho}bp"` (ex. `">ASV_2422-168bp"`). Posição = rank da ASV entre as sequências **únicas** da tabela (a tabela é long-format: a mesma ASV aparece em várias amostras, mas o rank é por sequência, não por linha), ordenado por tamanho decrescente; empate de tamanho desempatado pela abundância total da ASV (soma de `ASV absolute abundance` de todas as amostras onde ela aparece).
+- **Header da ASV.** Formato `">ASV_{posição}-{tamanho}bp"`, posição = rank por tamanho decrescente entre sequências únicas (empate por abundância total).
 
   ```{r}
   add_asv_header <- function(df) {
@@ -303,11 +301,9 @@ Estas colunas não vêm no CSV bruto (só existiam na planilha mestre, calculada
   }
   ```
 
-## 3. Bloco 2 — Refinamento de Hits BLAST + Limpeza de Nome
+## 3. Bloco 2: Refinamento de Hits BLAST + Limpeza de Nome
 
-Este bloco reaproveita a lógica de higienização de hits do `roots_metabar_metabarcoding-pipeline.qmd` (seções "Refine BLAST Hits" e "Clean Species Names"), preservando os mesmos padrões e regras de limpeza de nome; apenas os nomes de coluna de saída foram alinhados ao contrato de schema deste repositório (`BLAST ID`, não `blast ID`).
-
-- **Padrões de resultado ruim.** Lista de headers "não-informativos" do BLAST (ex. "Uncultured bacterium") que não devem ser aceitos como identificação. Não escapar os parênteses do último padrão é intencional — na fonte original eles também não são escapados (viram um grupo de regex, não um parêntese literal exigido no texto), então mantido idêntico para reproduzir o mesmo comportamento de match.
+- **Padrões de resultado ruim.** Headers "não-informativos" do BLAST (ex. "Uncultured bacterium") que não contam como identificação válida.
 
   ```{r}
   BAD_RES_PATTERNS <- paste0(c(
@@ -393,9 +389,7 @@ Este bloco reaproveita a lógica de higienização de hits do `roots_metabar_met
   }
   ```
 
-## 4. Bloco 3 — Taxonomia NCBI + Contaminação
-
-A parte de **taxonomia** reaproveita a lógica de "Retrieve Complete Lineages" / "Fill Missing Taxonomic Ranks" do roots_metabar (seção 7), usando diretamente o taxid do hit BLAST já selecionado em vez de resolver gênero → taxid separadamente, já que `1/2/3_staxid` vêm prontos no CSV bruto. A parte de **contaminação** reaproveita a lógica da seção 10 (Fold Change vs. controles).
+## 4. Bloco 3: Taxonomia NCBI + Contaminação
 
 ### Taxonomia NCBI
 
@@ -410,7 +404,7 @@ A parte de **taxonomia** reaproveita a lógica de "Retrieve Complete Lineages" /
   )
   ```
 
-- **Consultar taxonomia no NCBI.** Consulta o NCBI (`taxize::classification`) para os taxids únicos de `query_taxID` e devolve uma linha por taxid, uma coluna por nível taxonômico. Correção em relação à fonte original: o rank retornado pelo taxize para Bacteria/Archaea/Eukaryota/Viruses se chama `"superkingdom"`, não `"subkingdom"` — usa-se aqui o nome correto devolvido pela API, em vez do fallback manual que a fonte original aplicava para compensar o nome errado.
+- **Consultar taxonomia no NCBI.** Consulta o NCBI (`taxize::classification`) para os taxids únicos de `query_taxID` (do hit BLAST já selecionado) e devolve uma linha por taxid, uma coluna por nível taxonômico. O nível mais alto retornado pelo taxize se chama `"superkingdom"`.
 
   ```{r}
   retrieve_taxonomy <- function(taxids, entrez_key = NULL, batch_size = 50, verbose = TRUE) {
@@ -485,7 +479,7 @@ A parte de **taxonomia** reaproveita a lógica de "Retrieve Complete Lineages" /
   }
   ```
 
-- **Preencher ranks faltantes.** Propaga taxonomia faltante "de cima pra baixo": `Superkingdom` preenchido por regras a partir de `Kingdom`/`Phylum` quando o NCBI não devolveu esse nível; ranks intermediários viram `"{rank} of {rank superior}"` quando ausentes, pra não deixar buraco na hierarquia (em vez de `NA`, que quebraria agrupamentos downstream).
+- **Preencher ranks faltantes.** `Superkingdom` via regras a partir de `Kingdom`/`Phylum` quando ausente; ranks intermediários viram `"{rank} of {rank superior}"` em vez de `NA`.
 
   ```{r}
   fill_missing_ranks <- function(taxonomy_tbl) {
@@ -539,7 +533,7 @@ A parte de **taxonomia** reaproveita a lógica de "Retrieve Complete Lineages" /
   }
   ```
 
-- **Juntar taxonomia e finalizar.** Junta a taxonomia completa de volta pela `query_taxID` e corrige `BLAST ID` quando o hit BLAST veio abreviado (gênero em uma letra + ponto, ex. `"P.rivularis algo"`), substituindo pelo gênero completo resolvido no NCBI.
+- **Unir taxonomia e finalizar.** Une a taxonomia completa de volta pela `query_taxID` e corrige `BLAST ID` quando o hit BLAST veio abreviado (gênero em uma letra + ponto, ex. `"P.rivularis algo"`), substituindo pelo gênero completo resolvido no NCBI.
 
   ```{r}
   join_taxonomy_and_finalize <- function(df, taxonomy_tbl) {
@@ -568,9 +562,7 @@ A parte de **taxonomia** reaproveita a lógica de "Retrieve Complete Lineages" /
 
 ### Contaminação (fold change vs. controles)
 
-Valores de `Type` que marcam uma linha como sendo de um controle, e a coluna de referência (qual controle a amostra usa) → coluna de Fold Change gerada para aquele tipo, são fixos para os três tipos de controle do contrato de schema deste projeto (`Ext. Control` / `PCR Control` / `Filt. Control`).
-
-- **Valores de `Type` que identificam um controle.** Lista copiada do roots_metabar, com as variantes que de fato aparecem no nosso contrato de schema garantidas.
+- **Valores de `Type` que identificam um controle.** Variantes de nomenclatura observadas no contrato de schema.
 
   ```{r}
   CONTROL_TYPE_VALUES <- c(
@@ -592,7 +584,7 @@ Valores de `Type` que marcam uma linha como sendo de um controle, e a coluna de 
   )
   ```
 
-- **Função de fold change.** Equivalente a `gtools::foldchange(num, denom)` (FC = num/denom se num \>= denom, senão -denom/num) — reimplementado aqui para não adicionar uma dependência só por essa fórmula de uma linha.
+- **Função de fold change.** Equivalente a `gtools::foldchange(num, denom)` (FC = num/denom se num \>= denom, senão -denom/num).
 
   ```{r}
   foldchange <- function(num, denom) {
@@ -600,7 +592,7 @@ Valores de `Type` que marcam uma linha como sendo de um controle, e a coluna de 
   }
   ```
 
-- **Máximo seguro.** `max(x, na.rm = TRUE)`, mas sem o aviso "no non-missing arguments" e sem devolver `-Inf` quando o grupo é todo `NA` (ex. dataset sem nenhuma amostra de controle) — devolve `NA_real_` de forma limpa nesse caso.
+- **Máximo seguro.** `max(x, na.rm = TRUE)` sem o aviso "no non-missing arguments", devolvendo `NA_real_` (não `-Inf`) quando o grupo é todo `NA`.
 
   ```{r}
   safe_max <- function(x) {
@@ -608,7 +600,7 @@ Valores de `Type` que marcam uma linha como sendo de um controle, e a coluna de 
   }
   ```
 
-- **Marcar contaminação.** Para cada linha (ASV numa amostra real), compara com o(s) controle(s) que ela referencia via Fold Change (abundância relativa da amostra dividida pela abundância relativa máxima da mesma ASV no controle referenciado). FC abaixo do limiar em qualquer controle referenciado → `"Possible contamination"`. Ausência de match com nenhum controle (`Control presence` = `FALSE`) não é penalizada — só vira `"True detection"` por omissão, não por evidência.
+- **Marcar contaminação.** Para cada linha (ASV numa amostra real), compara com o(s) controle(s) que ela referencia via Fold Change (abundância relativa da amostra dividida pela abundância relativa máxima da mesma ASV no controle referenciado). FC abaixo do limiar em qualquer controle referenciado → `"Possible contamination"`. Ausência de match com nenhum controle (`Control presence` = `FALSE`) não é penalizada, só vira `"True detection"` por omissão, não por evidência.
 
   ```{r}
   flag_contamination <- function(df, fold_change_threshold = 10) {
@@ -679,9 +671,7 @@ Valores de `Type` que marcam uma linha como sendo de um controle, e a coluna de 
   }
   ```
 
-## 5. Bloco 4 — Curadoria Final
-
-Este bloco reaproveita a seção 11 do roots_metabar ("Final Results Curation"). O pseudo-score é sempre calculado a partir da identidade/cobertura do hit efetivamente selecionado (`Selected_Hit_Origin`, após descartar hits ruins) — nunca do hit 1 fixo.
+## 5. Bloco 4: Curadoria Final
 
 ### Faixa de amplicon
 
@@ -755,9 +745,7 @@ Este bloco reaproveita a seção 11 do roots_metabar ("Final Results Curation").
 
 ### Flag de táxons-alvo
 
-A marcação de táxons-alvo identifica ASVs que pertencem a um ou mais grupos taxonômicos de interesse ecológico, configurados em `config$taxons_alvo$grupos`. Cada grupo é resolvido a partir de um registro interno que associa o nome do grupo a um reino (`Kingdom (NCBI)`) usado como catch-all e/ou a listas de filo e classe — assim o YAML só precisa declarar **qual** grupo é relevante para o projeto, sem que o usuário precise listar filos e classes manualmente. O registro cobre os grupos ecológicos tipicamente monitorados num projeto de eDNA multi-primer (peixes via Metazoa, macroinvertebrados bentônicos, zooplâncton, fitoplâncton e perifíton); novos grupos podem ser adicionados ao registro conforme o projeto crescer.
-
-- **Registro interno de táxons-alvo.** Associa cada nome de grupo (usado em `config$taxons_alvo$grupos`) a um reino catch-all opcional e às listas de filo/classe que o compõem.
+- **Registro interno de táxons-alvo.** Associa cada nome de grupo (usado em `config$taxons_alvo$grupos`) a um reino catch-all opcional e às listas de filo/classe que o compõem. Cobre os grupos tipicamente monitorados num projeto de eDNA multi-primer (peixes via Metazoa, bentos, zooplâncton, fitoplâncton, perifíton).
 
   ```{r}
   TARGET_TAXA_REGISTRY <- list(
@@ -854,9 +842,7 @@ A marcação de táxons-alvo identifica ASVs que pertencem a um ou mais grupos t
   }
   ```
 
-## 6. Bloco 5 — Árvore Filogenética ASV-contra-ASV + Vizinhos
-
-O escopo deste bloco é ASV-contra-ASV (sem banco de referência externo); o piso de tamanho de entrada é o mínimo declarado em `amplicon_por_primer` para o primer da ASV, e o número de vizinhos extraídos por ASV é configurável via `arvore_filogenetica$k_vizinhos` (default 5). O método usado — `DECIPHER::AlignSeqs` (alinhamento múltiplo) + `ape::dist.dna(model="raw", pairwise.deletion=TRUE)` (distância-p) + `ape::njs` (Neighbor-Joining tolerante a distâncias faltantes) — é a mesma combinação de pacotes já usada no script de ecologia do projeto (`eDNA_cipo_script.qmd`).
+## 6. Bloco 5: Árvore Filogenética ASV-contra-ASV + Vizinhos
 
 - **Converter alinhamento para DNAbin.** Converte um `DNAStringSet` (Biostrings) alinhado num objeto `DNAbin` (ape).
 
@@ -869,7 +855,7 @@ O escopo deste bloco é ASV-contra-ASV (sem banco de referência externo); o pis
   }
   ```
 
-- **Montar a árvore ASV-contra-ASV.** Pega sequências únicas que passam no piso de tamanho do primer (config `amplicon_por_primer`), alinha e constrói a árvore. Retorna `NULL` (com aviso) se sobrarem menos de 3 ASVs — não dá pra montar vizinhança útil com menos que isso.
+- **Montar a árvore ASV-contra-ASV.** Pega sequências únicas que passam no piso de tamanho do primer (config `amplicon_por_primer`), alinha e constrói a árvore. Retorna `NULL` (com aviso) se sobrarem menos de 3 ASVs, não dá pra montar vizinhança útil com menos que isso.
 
   ```{r}
   build_asv_tree <- function(df, amplicon_por_primer) {
@@ -906,7 +892,7 @@ O escopo deste bloco é ASV-contra-ASV (sem banco de referência externo); o pis
   }
   ```
 
-- **Extrair os k vizinhos mais próximos.** Extrai os k vizinhos mais próximos de cada ASV na árvore (por distância patrística, `ape::cophenetic.phylo`) — evidência filogenética auxiliar para uma eventual curadoria assistida por LLM (informa, não decide sozinha).
+- **Extrair os k vizinhos mais próximos.** Extrai os k vizinhos mais próximos de cada ASV na árvore (por distância patrística, `ape::cophenetic.phylo`), evidência filogenética auxiliar para uma eventual curadoria assistida por LLM (informa, não decide sozinha).
 
   ```{r}
   extract_k_neighbors <- function(tree, k = 5) {
@@ -942,9 +928,9 @@ O escopo deste bloco é ASV-contra-ASV (sem banco de referência externo); o pis
   }
   ```
 
-## 7. Bloco 6 — Checagem Regional GBIF
+## 7. Bloco 6: Checagem Regional GBIF
 
-A fonte e a área da checagem regional vêm de `config$checagem_regional` (`fonte = "gbif"` e um bounding box `area_bbox`). O bounding box é usado exatamente como declarado, sem qualquer margem adicional aplicada automaticamente — para cobrir uma área maior, basta declarar um bbox maior no config. O script busca apenas o **fato** (quantos registros do GBIF existem para essa espécie dentro da área declarada); a **plausibilidade** (a espécie faz sentido nessa região?) é julgamento de uma etapa posterior, não um cálculo determinístico daqui.
+O bounding box declarado em `config$checagem_regional$area_bbox` é usado exatamente como está, sem margem automática. O script busca só o fato (quantos registros do GBIF existem na área); plausibilidade é julgamento de uma etapa posterior.
 
 - **Construir o polígono WKT.** Monta o polígono WKT (ordem "longitude latitude", como o GBIF espera) a partir do bounding box declarado no config.
 
@@ -961,7 +947,7 @@ A fonte e a área da checagem regional vêm de `config$checagem_regional` (`font
   }
   ```
 
-- **Contar registros regionais no GBIF.** Conta registros do GBIF pra um nome científico dentro da área declarada. `NA` (não `0`) se a consulta falhar — não confundir "sem registro" com "não consultou" (rede indisponível, nome não resolvido no GBIF etc.).
+- **Contar registros regionais no GBIF.** Conta registros do GBIF pra um nome científico dentro da área declarada. `NA` (não `0`) se a consulta falhar, não confundir "sem registro" com "não consultou" (rede indisponível, nome não resolvido no GBIF etc.).
 
   ```{r}
   gbif_regional_count <- function(scientific_name, wkt, verbose = TRUE) {
@@ -1012,9 +998,9 @@ A fonte e a área da checagem regional vêm de `config$checagem_regional` (`font
 
 ## 8. Padronização Final das Colunas de Output
 
-Por decisão do Gabriel, o CSV exportado é reordenado/filtrado pra ficar compatível com o output "long" histórico do projeto (aba "Resultados completos" de `eDNA_Cipo--Complete_results-2025-09-17.xlsx`): colunas em comum entram na mesma ordem do arquivo original; colunas que são versões renomeadas/corrigidas de uma coluna original (`Possible target taxon` no lugar de `Possible Metazoa`; `Ponto`/`Latitude`/`Longitude`/`Habitat`/`Rios` no lugar de `Metadata 1`/`8`/`9`/`10`/`11`) ficam na posição que a coluna original ocupava; colunas 100% novas deste sistema (sem equivalente no original — vizinhos filogenéticos, contagem GBIF, Fold Change de contaminação, presença de controle) são mantidas no final do output. Colunas puramente internas de processamento (`query_taxID`, ranks "extra" do taxize como `superclass`/`infraclass`, `Relative Abundance Sample`) continuam calculadas e usadas durante o pipeline, mas não aparecem no CSV final.
+O CSV exportado é reordenado e filtrado para compatibilidade com o formato "long" histórico do projeto: colunas em comum entram na mesma ordem do arquivo original; colunas renomeadas ou corrigidas (`Possible target taxon` no lugar de `Possible Metazoa`; `Ponto`/`Latitude`/`Longitude`/`Habitat`/`Rios` no lugar de `Metadata 1`/`8`/`9`/`10`/`11`) ficam na posição da coluna que substituem; colunas novas deste sistema (vizinhos filogenéticos, contagem GBIF, Fold Change de contaminação, presença de controle) ficam no final. Colunas internas de processamento (`query_taxID`, ranks "extra" do taxize, `Relative Abundance Sample`) são usadas durante o pipeline, mas não aparecem no CSV final.
 
-- **Ordem de colunas do output "long" histórico.** Cabeçalho real da aba "Resultados completos" — usado só para reordenar/selecionar a saída final, não influencia nenhum cálculo.
+- **Ordem de colunas do output "long" histórico.** Herdada do formato histórico do projeto; usada só para reordenar a saída final, não influencia nenhum cálculo.
 
   ```{r}
   ORIGINAL_LONG_COLUMN_ORDER <- c(
@@ -1046,7 +1032,7 @@ Por decisão do Gabriel, o CSV exportado é reordenado/filtrado pra ficar compat
   )
   ```
 
-- **Colunas renomeadas equivalentes.** Mapeia o nome da nossa coluna para o nome da coluna original que ela substitui — assim a coluna nova ocupa a posição da antiga em vez de ser tratada como novidade sem relação.
+- **Colunas renomeadas equivalentes.** Mapeia o nome da coluna nova para o nome da coluna original que ela substitui.
 
   ```{r}
   COLUMN_EQUIVALENTS <- c(
@@ -1059,7 +1045,7 @@ Por decisão do Gabriel, o CSV exportado é reordenado/filtrado pra ficar compat
   )
   ```
 
-- **Colunas 100% novas.** Sem equivalente no output original — mantidas no final, na ordem em que são calculadas pelo pipeline.
+- **Colunas 100% novas.** Sem equivalente no output original, mantidas no final, na ordem em que são calculadas pelo pipeline.
 
   ```{r}
   NEW_OUTPUT_COLUMNS <- c(
@@ -1178,7 +1164,7 @@ Por decisão do Gabriel, o CSV exportado é reordenado/filtrado pra ficar compat
   }
   ```
 
-- **Ponto de entrada.** O `if (!interactive())` impede que `main()` rode sozinho quando o documento é aberto interativamente (RStudio/Positron) — nesse modo, as funções acima ficam disponíveis para chamar uma a uma e inspecionar o resultado. Quando o script/documento é executado via `Rscript`, `main()` roda com os argumentos passados na linha de comando.
+- **Ponto de entrada.** O `if (!interactive())` impede que `main()` rode sozinho quando o documento é aberto interativamente (RStudio/Positron); nesse modo, as funções acima ficam disponíveis para chamar uma a uma e inspecionar o resultado. Quando o script/documento é executado via `Rscript`, `main()` roda com os argumentos passados na linha de comando.
 
   ```{r}
   if (!interactive()) {
