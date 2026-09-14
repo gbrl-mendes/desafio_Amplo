@@ -87,9 +87,13 @@ DEFAULT_CONFIG <- list(
   ),
   checagem_regional = list(
     fonte = "gbif",
-    # Area aproximada do PARNA/APA Serra do Cipo, usada como default deste
-    # projeto -- ajuste para a area de estudo real via --config.
-    area_bbox = list(lat_min = -19.6, lat_max = -19.1, long_min = -43.8, long_max = -43.3)
+    # Sem area_bbox declarada aqui: por padrao, a area consultada no GBIF e
+    # calculada a partir do min/max de Latitude/Longitude dos pontos
+    # amostrados nos proprios dados de entrada (ver compute_area_bbox),
+    # expandido por buffer_graus em cada lado. Declarar area_bbox no
+    # --config (lat_min/lat_max/long_min/long_max) usa essa area fixa em
+    # vez do calculo automatico.
+    buffer_graus = 0.1
   )
 )
 
@@ -726,6 +730,27 @@ run_phylogenetic_tree <- function(df, config = DEFAULT_CONFIG) {
     dplyr::left_join(neighbors, by = "ASV header")
 }
 
+compute_area_bbox <- function(df, config) {
+  if (!is.null(config$checagem_regional$area_bbox)) {
+    return(config$checagem_regional$area_bbox)
+  }
+  if (!all(c("Latitude", "Longitude") %in% colnames(df))) {
+    return(NULL)
+  }
+
+  lat <- df$Latitude[!is.na(df$Latitude)]
+  long <- df$Longitude[!is.na(df$Longitude)]
+  if (length(lat) == 0 || length(long) == 0) {
+    return(NULL)
+  }
+
+  buffer <- config$checagem_regional$buffer_graus
+  list(
+    lat_min = min(lat) - buffer, lat_max = max(lat) + buffer,
+    long_min = min(long) - buffer, long_max = max(long) + buffer
+  )
+}
+
 bbox_to_wkt <- function(area_bbox) {
   sprintf(
     "POLYGON((%f %f, %f %f, %f %f, %f %f, %f %f))",
@@ -765,7 +790,17 @@ run_regional_check <- function(df, config = DEFAULT_CONFIG) {
     return(dplyr::mutate(df, `GBIF regional occurrence count` = NA_integer_))
   }
 
-  wkt <- bbox_to_wkt(config$checagem_regional$area_bbox)
+  area_bbox <- compute_area_bbox(df, config)
+  if (is.null(area_bbox)) {
+    warning(
+      "Sem area_bbox declarada e sem Latitude/Longitude nos dados -- ",
+      "checagem regional pulada.",
+      call. = FALSE
+    )
+    return(dplyr::mutate(df, `GBIF regional occurrence count` = NA_integer_))
+  }
+
+  wkt <- bbox_to_wkt(area_bbox)
 
   species_lookup <- df %>%
     dplyr::filter(`Identification Max. taxonomy` == "Species") %>%
