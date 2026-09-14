@@ -10,12 +10,14 @@ if (nzchar(user_lib) && dir.exists(user_lib) && !(user_lib %in% .libPaths())) {
   .libPaths(c(user_lib, .libPaths()))
 }
 
-library(tidyverse)
-library(yaml)
-library(taxize)
-library(DECIPHER)
-library(ape)
-library(rgbif)
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(yaml)
+  library(taxize)
+  library(DECIPHER)
+  library(ape)
+  library(rgbif)
+})
 
 get_repo_root <- function() {
   cli_args <- commandArgs(trailingOnly = FALSE)
@@ -908,6 +910,13 @@ parse_cli_args <- function(args) {
   list(input = positional[1], config = config_path, output = output_path)
 }
 
+format_counts <- function(x, na_label = "sem dado") {
+  tab <- table(x, useNA = "always")
+  labels <- names(tab)
+  labels[is.na(labels)] <- na_label
+  paste(sprintf("%s: %d", labels, as.integer(tab)), collapse = ", ")
+}
+
 main <- function(args) {
   parsed <- parse_cli_args(args)
   config <- load_config(parsed$config)
@@ -922,21 +931,16 @@ main <- function(args) {
 
   cat(sprintf("Tabela parseada: %d linhas, %d colunas.\n", nrow(df), ncol(df)))
   cat("Colunas calculadas localmente: ASV Size (pb), Sample total abundance, ASV header.\n")
-  cat("Origem do hit selecionado (Selected_Hit_Origin):\n")
-  print(table(df$Selected_Hit_Origin, useNA = "always"))
+  cat(sprintf("Origem do hit selecionado (Selected_Hit_Origin): %s\n", format_counts(df$Selected_Hit_Origin)))
   cat(sprintf(
     "BLAST ID = 'Match_not_reliable' em %d de %d linhas.\n",
     sum(df$`BLAST ID` == "Match_not_reliable"), nrow(df)
   ))
-  cat("Status de contaminacao:\n")
-  print(table(df$`Contamination status`, useNA = "always"))
-  cat("Faixa de amplicon (Primer expected length):\n")
-  print(table(df$`Primer expected length`, useNA = "always"))
-  cat("Identificacao maxima (Identification Max. taxonomy):\n")
-  print(table(df$`Identification Max. taxonomy`, useNA = "always"))
+  cat(sprintf("Status de contaminacao: %s\n", format_counts(df$`Contamination status`)))
+  cat(sprintf("Faixa de amplicon (Primer expected length): %s\n", format_counts(df$`Primer expected length`)))
+  cat(sprintf("Identificacao maxima (Identification Max. taxonomy): %s\n", format_counts(df$`Identification Max. taxonomy`)))
   cat(sprintf("Grupos de taxons-alvo configurados: %s\n", paste(config$taxons_alvo$grupos, collapse = ", ")))
-  cat("Possible target taxon:\n")
-  print(table(df$`Possible target taxon`, useNA = "always"))
+  cat(sprintf("Possible target taxon: %s\n", format_counts(df$`Possible target taxon`)))
   cat(sprintf(
     "Vizinhos filogeneticos calculados para %d de %d linhas (NA = ASV abaixo do piso de tamanho).\n",
     sum(!is.na(df$`Vizinhos filogeneticos (k)`)), nrow(df)
@@ -945,7 +949,6 @@ main <- function(args) {
     "Checagem regional GBIF: %d linhas com identificacao em nivel de especie consultadas.\n",
     sum(!is.na(df$`GBIF regional occurrence count`))
   ))
-  print(dplyr::glimpse(df))
 
   if (!is.null(parsed$output)) {
     readr::write_csv2(df, parsed$output)

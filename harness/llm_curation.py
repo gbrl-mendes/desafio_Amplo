@@ -62,6 +62,12 @@ EVIDENCE_COLUMNS = [
     "Class (NCBI)",
     "Vizinhos filogeneticos (k)",
     "GBIF regional occurrence count",
+    # Usadas so pelo filtro de qualidade em needs_review(), nao entram no
+    # prompt -- invariantes por ASV (dependem so de ASV Size/taxonomia, nao
+    # da amostra especifica), entao agregar por "first" e seguro.
+    "Primer expected length",
+    "Possible target taxon",
+    "Read origin",
 ]
 
 PROMPT_TEMPLATE = """Você é um especialista em curadoria taxonômica de dados de eDNA \
@@ -143,7 +149,24 @@ class LlmCurationResult:
 def needs_review(row: pd.Series) -> bool:
     """True se a identificacao deterministica dessa ASV nao foi conclusiva
     o bastante pra dispensar uma segunda opiniao: sem hit confiavel, nivel
-    abaixo de especie, ou especie sem nenhum registro regional no GBIF."""
+    abaixo de especie, ou especie sem nenhum registro regional no GBIF.
+
+    So considera ASVs que ja passaram nos filtros de qualidade da curadoria
+    deterministica -- amplicon no tamanho esperado, taxon dentro do escopo
+    declarado, sem sinal de contaminacao em nenhuma amostra, leitura merged.
+    Uma ASV que falha em qualquer um desses e descartada por um motivo que
+    nao tem nada a ver com identificacao taxonomica, entao pedir uma segunda
+    opiniao de identificacao pra ela nao agrega nada -- so gasta cota de API.
+    """
+    if row.get("Primer expected length") != "in range":
+        return False
+    if not bool(row.get("Possible target taxon", False)):
+        return False
+    if row.get("n_amostras_possivel_contaminacao", 0) > 0:
+        return False
+    if str(row.get("Read origin", "")).strip().lower() != "merged":
+        return False
+
     if row.get("BLAST ID") == "Match_not_reliable":
         return True
     if row.get("Identification Max. taxonomy") != "Species":
@@ -244,6 +267,17 @@ def _parse_llm_json(content: str) -> dict:
         raise
 
 
+def extract_groq_error_message(resp: requests.Response) -> str:
+    """Reduz uma resposta de erro da Groq pro essencial (codigo HTTP +
+    `error.message`) em vez do corpo bruto, que sai cortado no meio do JSON
+    quando so truncado por tamanho de caractere."""
+    try:
+        message = resp.json()["error"]["message"]
+    except (ValueError, KeyError, TypeError):
+        message = resp.text[:200]
+    return f"{resp.status_code}: {message}"
+
+
 def call_groq(
     prompt: str,
     api_key: str,
@@ -270,7 +304,7 @@ def call_groq(
                 timeout=timeout,
             )
             if resp.status_code == 429 or resp.status_code >= 500:
-                raise requests.HTTPError(f"{resp.status_code}: {resp.text[:200]}", response=resp)
+                raise requests.HTTPError(extract_groq_error_message(resp), response=resp)
             resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"]
             return _parse_llm_json(content)

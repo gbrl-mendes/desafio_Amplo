@@ -19,7 +19,7 @@ from typing import Callable, Optional
 import pandas as pd
 import requests
 
-from harness.llm_curation import DEFAULT_MODEL, GROQ_BASE_URL, load_env
+from harness.llm_curation import DEFAULT_MODEL, GROQ_BASE_URL, extract_groq_error_message, load_env
 
 REPORT_PROMPT_TEMPLATE = """Você escreve relatórios técnicos de curadoria de dados de eDNA \
 (metabarcoding) de peixes para uma consultoria ambiental. Abaixo estão os números e casos \
@@ -189,7 +189,7 @@ def call_groq_report(
                 timeout=timeout,
             )
             if resp.status_code == 429 or resp.status_code >= 500:
-                raise requests.HTTPError(f"{resp.status_code}: {resp.text[:200]}", response=resp)
+                raise requests.HTTPError(extract_groq_error_message(resp), response=resp)
             resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"]
             return _parse_report_text(content)

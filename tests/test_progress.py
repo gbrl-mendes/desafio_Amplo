@@ -43,6 +43,8 @@ def _base_row(**overrides) -> dict:
         "Class (NCBI)": "Actinopteri",
         "Vizinhos filogeneticos (k)": ">ASV_2-168bp",
         "GBIF regional occurrence count": 42,
+        "Possible target taxon": True,
+        "Read origin": "merged",
         "Contamination status": "True detection",
         "Primer expected length": "in range",
     }
@@ -68,6 +70,24 @@ def test_format_input_summary_notes_reference_file_when_given():
     summary = format_input_summary(df, reference_csv="data/example/spp_tradicional.csv")
 
     assert "spp_tradicional.csv" in summary
+
+
+def test_format_input_summary_explains_asvs_exclusive_to_controls():
+    # Uma ASV que so aparece num controle (nunca detectada numa amostra
+    # real) faz o total divergir do que o checkpoint (Type == "Sample")
+    # vai contar depois -- a mensagem tem que explicar isso, nao esconder.
+    df = pd.DataFrame(
+        [
+            _base_row(**{"ASV (Sequence)": "AAAA"}),
+            _base_row(**{"ASV (Sequence)": "TTTT", "Type": "Ext. Control", "Sample": "SC_ctrl"}),
+        ]
+    )
+
+    summary = format_input_summary(df, reference_csv=None)
+
+    assert "2 no total" in summary
+    assert "1 detectada(s) em amostra(s) real(is)" in summary
+    assert "1 exclusiva(s) de controle" in summary
 
 
 def test_format_input_summary_warns_on_multiple_researchers_or_projects():

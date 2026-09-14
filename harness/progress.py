@@ -25,8 +25,20 @@ def format_input_summary(df: pd.DataFrame, reference_csv: str | None) -> str:
     antes de esperar a execucao inteira."""
     researchers = sorted(df["Researcher"].dropna().astype(str).unique()) if "Researcher" in df.columns else []
     projects = sorted(df["Project"].dropna().astype(str).unique()) if "Project" in df.columns else []
-    n_asvs = df["ASV (Sequence)"].nunique() if "ASV (Sequence)" in df.columns else None
     n_rows = len(df)
+
+    n_asvs = df["ASV (Sequence)"].nunique() if "ASV (Sequence)" in df.columns else None
+    # Uma ASV pode existir SO num controle (nunca detectada numa amostra
+    # real) -- o checkpoint (build_asv_evidence, mais adiante) so considera
+    # linhas Type == "Sample", entao o total aqui pode ser maior do que o
+    # numero de ASVs que efetivamente entram na curadoria assistida. Mostrar
+    # os dois evita que pareca uma contagem inconsistente entre as duas
+    # etapas.
+    n_asvs_in_samples = (
+        df.loc[df["Type"] == "Sample", "ASV (Sequence)"].nunique()
+        if "ASV (Sequence)" in df.columns and "Type" in df.columns
+        else None
+    )
 
     hit1_cols = ["1_subject header", "1_staxid", "1_indentity", "1_qcovhsp"]
     hit1_present = [c for c in hit1_cols if c in df.columns]
@@ -41,7 +53,15 @@ def format_input_summary(df: pd.DataFrame, reference_csv: str | None) -> str:
         f"Linhas (sequencia x amostra): {n_rows}",
     ]
     if n_asvs is not None:
-        lines.append(f"Sequencias unicas (ASVs): {n_asvs}")
+        if n_asvs_in_samples is not None and n_asvs_in_samples != n_asvs:
+            lines.append(
+                f"Sequencias unicas (ASVs): {n_asvs} no total "
+                f"({n_asvs_in_samples} detectada(s) em amostra(s) real(is), "
+                f"{n_asvs - n_asvs_in_samples} exclusiva(s) de controle -- "
+                "o checkpoint mais adiante conta so as detectadas em amostras reais)"
+            )
+        else:
+            lines.append(f"Sequencias unicas (ASVs): {n_asvs}")
     if hit1_present:
         lines.append(
             f"Hit 1 do BLAST completo (header/staxid/identidade/cobertura): {hit1_filled}/{n_rows} linhas"

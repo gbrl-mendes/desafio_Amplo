@@ -14,9 +14,41 @@ from harness.llm_curation import (
     ASSISTED_COLUMNS,
     build_asv_evidence,
     build_traditional_evidence_text,
+    extract_groq_error_message,
     needs_review,
     run_llm_assisted_curation,
 )
+
+
+class _FakeResponse:
+    """Stub minimo de requests.Response -- so o que extract_groq_error_message usa."""
+
+    def __init__(self, status_code: int, json_body: dict | None = None, text: str = ""):
+        self.status_code = status_code
+        self._json_body = json_body
+        self.text = text
+
+    def json(self):
+        if self._json_body is None:
+            raise ValueError("no JSON body")
+        return self._json_body
+
+
+def test_extract_groq_error_message_uses_error_message_field():
+    resp = _FakeResponse(429, json_body={"error": {"message": "Rate limit reached for model X"}})
+
+    message = extract_groq_error_message(resp)
+
+    assert message == "429: Rate limit reached for model X"
+
+
+def test_extract_groq_error_message_falls_back_to_raw_text_without_json():
+    resp = _FakeResponse(500, json_body=None, text="<html>Internal Server Error</html>")
+
+    message = extract_groq_error_message(resp)
+
+    assert message.startswith("500: ")
+    assert "<html>" in message
 
 
 def _base_row(**overrides) -> dict:
@@ -39,6 +71,9 @@ def _base_row(**overrides) -> dict:
         "Vizinhos filogeneticos (k)": ">ASV_2-168bp; >ASV_3-167bp",
         "GBIF regional occurrence count": 42,
         "Contamination status": "True detection",
+        "Primer expected length": "in range",
+        "Possible target taxon": True,
+        "Read origin": "merged",
     }
     row.update(overrides)
     return row
@@ -70,6 +105,30 @@ def test_needs_review_true_for_species_with_na_gbif():
 
 def test_needs_review_false_for_confident_species():
     row = pd.Series(_base_row())
+    assert needs_review(row) is False
+
+
+def test_needs_review_false_when_amplicon_out_of_range_even_if_unreliable():
+    # Amplicon fora do tamanho esperado (provavel primer-dimer/artefato) --
+    # a ASV ja e descartada por isso, pedir identificacao da LLM nao ajuda.
+    row = pd.Series(_base_row(**{"Primer expected length": "out of range", "BLAST ID": "Match_not_reliable"}))
+    assert needs_review(row) is False
+
+
+def test_needs_review_false_when_not_target_taxon():
+    row = pd.Series(_base_row(**{"Possible target taxon": False, "Identification Max. taxonomy": "Genus"}))
+    assert needs_review(row) is False
+
+
+def test_needs_review_false_when_any_sample_flagged_possible_contamination():
+    row = pd.Series(
+        _base_row(**{"n_amostras_possivel_contaminacao": 1, "Identification Max. taxonomy": "Genus"})
+    )
+    assert needs_review(row) is False
+
+
+def test_needs_review_false_when_read_origin_not_merged():
+    row = pd.Series(_base_row(**{"Read origin": "R1", "Identification Max. taxonomy": "Genus"}))
     assert needs_review(row) is False
 
 
