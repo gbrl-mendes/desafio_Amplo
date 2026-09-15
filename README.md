@@ -2,7 +2,7 @@
 
 Este projeto implementa minha resposta ao desafio técnico do processo seletivo para a vaga de Cientista de Dados Pleno na Amplo Engenharia, desenvolvido segundo os parâmetros pré-definidos para os concorrentes.
 
-O problema resolvido, descrito em detalhes em [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md), é hipotético: uma consultoria ambiental recebe uma tabela bruta de sequências de DNA ambiental e precisa transformá-la numa base de dados confiável sobre quais espécies existem numa área de estudo. Este é o sistema que a cientista de dados dessa consultoria executaria para resolver esta demanda. Ele identifica cada sequência taxonomicamente, separa detecção real de contaminação, confere se o tamanho é compatível com o marcador genético usado, e, para os casos que essas três etapas não resolvem sozinhas, consulta um modelo de linguagem (LLM) com a evidência já calculada para uma segunda opinião. O resultado dessa segunda opinião nunca sobrescreve o resultado determinístico, entra como colunas adicionais. No final, o profissional humano ainda tem a possibilidade de definir, com base em tudo que foi gerado, quais são as identificações mais parcimoniosas.
+O problema resolvido, descrito em detalhes em [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md), é hipotético: uma consultoria ambiental recebe uma tabela bruta de sequências de DNA ambiental e precisa transformá-la numa base de dados confiável sobre quais espécies existem numa área de estudo. Este é o sistema que a cientista de dados dessa consultoria executaria para resolver essa demanda, em qualquer projeto de metabarcoding que receber, independente do grupo taxonômico ou do substrato amostrado. Ele identifica cada sequência taxonomicamente, separa detecção real de contaminação, confere se o tamanho é compatível com o marcador genético usado, e, para os casos que essas três etapas não resolvem sozinhas, consulta um modelo de linguagem (LLM) com a evidência já calculada para uma segunda opinião. O resultado dessa segunda opinião nunca sobrescreve o resultado determinístico, entra como colunas adicionais. No final, o profissional humano ainda tem a possibilidade de definir, com base em tudo que foi gerado, quais são as identificações mais parcimoniosas.
 
 Veja [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md) para o problema, o domínio, os formatos e as limitações declaradas deste sistema, e [RELATORIO_EXEMPLO.md](RELATORIO_EXEMPLO.md) para uma execução real sobre o dado de demonstração, com achados concretos. As decisões de arquitetura e a calibração de cada parâmetro estão documentadas nos comentários do próprio [`r/curadoria_deterministica.qmd`](r/curadoria_deterministica.qmd), seção a seção.
 
@@ -63,7 +63,7 @@ Código de saída do processo: `0` sucesso, `2` entrada recusada pela validaçã
 
 ### Exemplos
 
-- **Primeiro exemplo: Dataset de Sequências de eDNA de Peixes**
+- **Primeiro exemplo: peixes, eDNA de água**
 
 ```bash
 python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv
@@ -79,19 +79,19 @@ python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2
 
 Mesma execução, mas a curadoria assistida também considera, por ponto de coleta, as espécies já registradas por métodos tradicionais na tabela de `--reference`.
 
-- **Segundo exemplo: Dataset de Metabarcoding de Raízes**
+- **Segundo exemplo: plantas, metabarcoding de raízes**
 
 ```bash
 python -m harness data/example/exemplo_2/dasafio_Amplo-roots_metabar_subset_output-2026-09-15.csv --reference data/example/exemplo_2/roots_metabar_spp_tradicional.csv --config data/example/exemplo_2/config.yaml
 ```
 
-Segundo dado de demonstração, do projeto roots_metabar (raízes, primer ITS2, plantas), de domínio taxonômico e origem diferentes do primeiro. Não tem dados de Latitude/Longitude, então a checagem regional por GBIF é pulada.  O `--config` aponta o grupo taxonômico alvo para `Plantae` e mapeia o nome de coluna de controle próprio deste dataset (`PCR control`) para o nome interno esperado.
+Segundo dado de demonstração, do projeto `roots_metabar` (raízes, primer ITS2, plantas), de domínio taxonômico e origem diferentes do primeiro. Não tem dados de latitude/longitude, então a checagem regional por GBIF é pulada. O `--config` aponta o grupo taxonômico alvo para `Plantae` e mapeia o nome de coluna de controle próprio deste dataset (`PCR control`) para o nome interno esperado.
 
-## Configuração:`--config`
+## Configuração: `--config`
 
-O parâmetro `--config` aceita um arquivo YAML opcional, lido pela validação em Python (`tools/schema_validation.py`) e pelo pipeline em R (`r/curadoria_deterministica.r`), com os defaults em `DEFAULT_CONFIG`. Declare só os parâmetros que precisam mudar para o seu projeto; o resto fica no valor padrão.
+O parâmetro `--config` aceita um arquivo YAML opcional, lido pela validação em Python (`tools/schema_validation.py`) e pelo pipeline em R (`r/curadoria_deterministica.R`), com os defaults em `DEFAULT_CONFIG`. Declare só os parâmetros que precisam mudar para o seu projeto; o resto fica no valor padrão.
 
-Exemplo com todas os parâmetros preenchidos:
+Exemplo com todos os parâmetros preenchidos:
 
 ```yaml
 colunas_alias:
@@ -133,7 +133,7 @@ Cada par declarado é `nome no seu CSV: nome canônico`. Por exemplo, se a colun
 
 ```yaml
 colunas_alias:
-  Pesquisador: Pesquisador
+  Pesquisador: Researcher
 ```
 
 Isso renomeia a coluna para `Researcher` antes de qualquer outra etapa rodar, inclusive antes da checagem de coluna obrigatória. Dali em diante, o resto do sistema nunca sabe que o nome original era diferente.
@@ -145,20 +145,18 @@ Isso renomeia a coluna para `Researcher` antes de qualquer outra etapa rodar, in
 
 **`contaminacao.fold_change_threshold`.** Limiar do Fold Change (abundância relativa na amostra dividida pela abundância relativa máxima da mesma sequência no controle referenciado) abaixo do qual uma detecção vira `"Possible contamination"`. Default `10`.
 
-**`amplicon_por_primer`.** Faixa de tamanho esperada (pb) por primer, usada para marcar `Primer expected length` e como piso mínimo na árvore filogenética; a chave precisa bater com os valores da coluna `Primer` do CSV. Default só declara `MiFish2: [140, 200]`; qualquer outro primer usado precisa ser declarado aqui.
+**`amplicon_por_primer`.** Faixa de tamanho esperada (pb) por primer, usada para marcar `Primer expected length` e como piso mínimo na árvore filogenética; a chave precisa bater com os valores da coluna `Primer` do CSV. Primer não declarado aqui tem a faixa estimada automaticamente a partir da distribuição de tamanho das próprias sequências daquele primer no dataset (quartis, com margem de 1,5× o intervalo interquartil), avisando quando faz essa estimativa; com poucos dados demais para estimar (menos de 4 sequências), a coluna fica `NA` em vez de arriscar um valor. Default só declara `MiFish2: [140, 200]`.
 
 **`identificacao.pseudoscore_thresholds`.** Limiares do pseudo-score que definem até que nível taxonômico uma sequência é identificada: acima do limiar de `especie`, aceita a identificação do BLAST; senão sobe para `genero`, `familia`, `ordem`, `classe`, nessa ordem; abaixo de todos, vira `"Unidentified"`. Default: `especie: 98, genero: 95, familia: 90, ordem: 80, classe: 60`.
 
 **`arvore_filogenetica.k_vizinhos`.** Quantos vizinhos filogenéticos mais próximos (distância na árvore Neighbor-Joining entre as sequências únicas) entram na coluna `Vizinhos filogenéticos (k)`, evidência usada pela curadoria assistida. Default `5`.
 
-**`taxons_alvo.grupos`.** Lista de grupos ecológicos considerados dentro do escopo para `Possible target taxon`, comparando reino/filo/classe de cada sequência contra os grupos listados. Grupos disponíveis: `Metazoa`, `Benthos`, `Zooplankton`, `Periphyton`, `Phytoplankton`; default     `["Metazoa"]`.
+**`taxons_alvo.grupos`.** Lista de grupos ecológicos considerados dentro do escopo para `Possible target taxon`, comparando reino/filo/classe de cada sequência contra os grupos listados. Grupos disponíveis: `Metazoa`, `Plantae`, `Benthos`, `Zooplankton`, `Periphyton`, `Phytoplankton`; default `["Metazoa"]`.
 
 **`checagem_regional`.**
 
 - `fonte`: de onde vêm os registros de ocorrência regional; só `"gbif"` está implementado, outro valor pula a etapa com aviso.
-
 - `buffer_graus`: margem (grau decimal) somada em cada lado do bounding box calculado a partir do min/max de `Latitude`/`Longitude` dos pontos amostrados nos dados. Default `0.1` (~11 km).
-
 - `area_bbox` (opcional): bounding box fixo (`lat_min`, `lat_max`, `long_min`, `long_max`, grau decimal), usado no lugar do cálculo automático quando declarado. Sem `Latitude`/`Longitude` nos dados e sem `area_bbox`, a checagem regional é pulada com aviso.
 
 ## Formatos de entrada e saída
