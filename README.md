@@ -13,12 +13,12 @@ Veja [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md) para o problema, o domínio,
 | [`tools/schema_validation.py`](tools/schema_validation.py)         | Valida o contrato de entrada (Python). Recusa a execução antes de rodar qualquer coisa se faltar coluna obrigatória, houver vazamento de gabarito, ou a chave primária for duplicada.                                                                                                                                                                                                                                                                                                                            |
 | [`r/curadoria_deterministica.qmd`](r/curadoria_deterministica.qmd) | Toda a lógica determinística (R): leitura do CSV, refinamento dos três melhores hits de BLAST (busca por similaridade de sequência num banco de referência), consulta de taxonomia ao NCBI, checagem de contaminação contra os controles, faixa de tamanho esperada por marcador genético, pseudo-score (nota de confiança combinando identidade e cobertura do alinhamento), árvore filogenética entre as sequências, e checagem de ocorrência regional no GBIF (banco público de registros de biodiversidade). |
 | [`r/curadoria_deterministica.R`](r/curadoria_deterministica.R)     | Versão executável, gerada do `.qmd` acima. É o arquivo que o harness realmente chama, como um subprocesso separado.                                                                                                                                                                                                                                                                                                                                                                                              |
-| [`r/analise_ecologica.qmd`](r/analise_ecologica.qmd)                | Análise ecológica opcional (R): riqueza, diversidade (Shannon/Simpson), curva de acumulação, dissimilaridade entre pontos, composição taxonômica, comparação eDNA × métodos tradicionais. Roda sobre a coluna `Curated ID` do CSV já curado, não refaz identificação nenhuma.                                                                                                                                                                                                                                    |
-| [`r/analise_ecologica.R`](r/analise_ecologica.R)                    | Versão executável, gerada do `.qmd` acima.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| [`harness/orchestrator.py`](harness/orchestrator.py)               | Integração de todas as etapas: validação da entrada, execução do pipeline em R, verificação do output do R, chamada da curadoria assistida por LLM, geração do relatório narrativo, análise ecológica opcional, geração do relatório HTML único, e gravação do log em JSON de cada execução.                                                                                                                                                                                                                    |
+| [`r/analise_ecologica.qmd`](r/analise_ecologica.qmd)               | Análise ecológica opcional (R): riqueza, diversidade (Shannon/Simpson), curva de acumulação, dissimilaridade entre pontos, composição taxonômica, comparação eDNA × métodos tradicionais. Roda sobre a coluna `Curated ID` do CSV já curado, não refaz identificação nenhuma.                                                                                                                                                                                                                                    |
+| [`r/analise_ecologica.R`](r/analise_ecologica.R)                   | Versão executável, gerada do `.qmd` acima.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| [`harness/orchestrator.py`](harness/orchestrator.py)               | Integração de todas as etapas: validação da entrada, execução do pipeline em R, verificação do output do R, chamada da curadoria assistida por LLM, geração do relatório narrativo, análise ecológica opcional, geração do relatório HTML único, e gravação do log em JSON de cada execução.                                                                                                                                                                                                                     |
 | [`harness/llm_curation.py`](harness/llm_curation.py)               | Curadoria assistida por LLM, via Groq.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | [`harness/report_generation.py`](harness/report_generation.py)     | Relatório narrativo da execução, também via Groq, a partir dos agregados gerados nas etapas anteriores.                                                                                                                                                                                                                                                                                                                                                                                                          |
-| [`harness/html_report.py`](harness/html_report.py)                 | Relatório HTML único por execução (ver "Relatório HTML" abaixo), gerado só quando a análise ecológica roda.                                                                                                                                                                                                                                                                                                                                                                                                       |
+| [`harness/html_report.py`](harness/html_report.py)                 | Relatório HTML único por execução (ver "Relatório HTML" abaixo), gerado só quando a análise ecológica roda.                                                                                                                                                                                                                                                                                                                                                                                                      |
 | [`harness/__main__.py`](harness/__main__.py)                       | Ponto de entrada da linha de comando (`python -m harness`).                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ## Requisitos
@@ -36,7 +36,6 @@ python -m venv .venv
 # source .venv/bin/activate   # Linux/Mac
 pip install -r requirements.txt
 Rscript r/install_packages.R
-cp .env.example .env   # e edite .env com sua própria chave da Groq (opcional)
 ```
 
 No Windows, se `.venv\Scripts\activate` recusar rodar com "running scripts is disabled on this system", a política de execução do PowerShell está bloqueando o script. Rode antes, na mesma sessão do terminal:
@@ -50,7 +49,7 @@ Vale só para essa sessão, não precisa de administrador.
 ## Execução
 
 ```bash
-python -m harness <entrada.csv> [--config config.yaml] [--output output_pos_curadoria_LLM-AAAA-MM-DD.csv] [--runs-dir runs/] [--llm-mode live|mock|off] [--reference spp_tradicional.csv] [--ecologia] [--groq-api-key chave] [--groq-model modelo]
+python -m harness <entrada.csv> [--config config.yaml] [--output output_pos_curadoria_LLM-AAAA-MM-DD.csv] [--runs-dir runs/] [--llm-mode live|mock|off] [--reference spp_tradicional.csv] [--ecologia] [--groq-api-key chave]
 ```
 
 - `<entrada.csv>`: obrigatório, a menos que `--ecologia-somente` seja usado no lugar. Schema completo em [`data/reference/asv_input_schema.yaml`](data/reference/asv_input_schema.yaml).
@@ -64,7 +63,7 @@ python -m harness <entrada.csv> [--config config.yaml] [--output output_pos_cura
 - `--reference`: CSV opcional (`;`-delimitado, UTF-8, pelo menos 2 colunas: ponto amostral na primeira, taxon na última ou numa coluna chamada `Taxon_binomial`; colunas extras no meio, e o nome literal de cada coluna, são irrelevantes) com espécies já registradas por métodos tradicionais nos mesmos pontos amostrais, usado como evidência adicional na curadoria assistida (ver [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md)). Também alimenta a comparação eDNA × tradicional de `--ecologia`, se essa flag for usada. Exemplo em [`data/example/exemplo_1/spp_tradicional.csv`](data/example/exemplo_1/spp_tradicional.csv).
 - `--ecologia`: roda a análise ecológica ([`r/analise_ecologica.qmd`](r/analise_ecologica.qmd)) logo após a curadoria assistida, sobre a coluna `Curated ID` do CSV final. Escreve tabelas e gráficos em `runs/<timestamp>_ecologia/`, e também gera o relatório HTML único (ver "Relatório HTML" abaixo). Desligada por padrão; uma falha aqui nunca invalida a curadoria já concluída, só fica registrada no log.
 - `--ecologia-somente <curado.csv>`: roda só a análise ecológica sobre um CSV já curado por uma execução anterior, opcionalmente revisado à mão (ver o parágrafo sobre `Curated ID` abaixo). Mutuamente exclusivo com `<entrada.csv>`: não refaz nenhuma etapa de curadoria, só valida as colunas mínimas necessárias e chama a análise ecológica. Exemplo em "Exemplos" abaixo.
-- `--groq-api-key` / `--groq-model`: informam a chave e o modelo da Groq diretamente na chamada, com prioridade sobre `GROQ_API_KEY`/`GROQ_MODEL` (variável de ambiente ou `.env`). Ver "Configuração da chave da Groq" abaixo para a ordem de prioridade completa e para quando preferir cada forma.
+- `--groq-api-key`: informam a chave Groq. Ver "Configuração da chave da Groq" abaixo para mais informações.
 
 O CSV final sempre traz uma coluna `Curated ID`, preenchida automaticamente (`Assisted ID (LLM)` quando existir, senão a identificação determinística). É a mesma coluna que, no fluxo tradicional deste tipo de projeto, um especialista preencheria à mão antes da análise ecológica: aqui vem pré-preenchida como sugestão, e o profissional pode revisar e sobrescrever qualquer valor antes de rodar `--ecologia` (nessa mesma execução) ou `--ecologia-somente` (numa execução separada, depois de revisar o CSV). Essa versão automática não é o gabarito de curadoria humana revisado formalmente: essa validação, quando feita, acontece fora deste repositório (ver [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md)).
 
@@ -75,7 +74,7 @@ Código de saída do processo: `0` sucesso, `2` entrada recusada pela validaçã
 - **Primeiro exemplo: peixes, eDNA de água**
 
 ```bash
-python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv
+python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --groq-api-key <chave>
 ```
 
 O dado de demonstração é um subset randomizado de 50 sequências (80 linhas, sequência × amostra) do projeto eDNA_Cipo, reduzido para manter o consumo de cota de API e o tempo de execução baixos. Sem `--output`, grava `runs/output_pos_curadoria_LLM-<AAAA-MM-DD>.csv`, um log em `runs/<timestamp>.json` e um relatório narrativo em `runs/<timestamp>_relatorio.md`.
@@ -83,7 +82,7 @@ O dado de demonstração é um subset randomizado de 50 sequências (80 linhas, 
 - **Uso com referência de amostragens tradicionais**
 
 ```bash
-python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv
+python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv --groq-api-key <chave>
 ```
 
 Mesma execução, mas a curadoria assistida também considera, por ponto de coleta, as espécies já registradas por métodos tradicionais na tabela de `--reference`.
@@ -91,7 +90,7 @@ Mesma execução, mas a curadoria assistida também considera, por ponto de cole
 - **Segundo exemplo: plantas, metabarcoding de raízes**
 
 ```bash
-python -m harness data/example/exemplo_2/dasafio_Amplo-roots_metabar_subset_output-2026-09-15.csv --reference data/example/exemplo_2/roots_metabar_spp_tradicional.csv --config data/example/exemplo_2/config.yaml
+python -m harness data/example/exemplo_2/dasafio_Amplo-roots_metabar_subset_output-2026-09-15.csv --reference data/example/exemplo_2/roots_metabar_spp_tradicional.csv --config data/example/exemplo_2/config.yaml --groq-api-key <chave>
 ```
 
 Segundo dado de demonstração, do projeto `roots_metabar` (raízes, primer ITS2, plantas), de domínio taxonômico e origem diferentes do primeiro. Não tem dados de latitude/longitude, então a checagem regional por GBIF é pulada. O `--config` aponta o grupo taxonômico alvo para `Plantae` e mapeia o nome de coluna de controle próprio deste dataset (`PCR control`) para o nome interno esperado.
@@ -99,7 +98,7 @@ Segundo dado de demonstração, do projeto `roots_metabar` (raízes, primer ITS2
 - **Com análise ecológica na mesma execução**
 
 ```bash
-python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia
+python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia --groq-api-key <chave>
 ```
 
 Mesma execução do primeiro exemplo, mas com `--ecologia`: além do CSV curado, grava riqueza/diversidade por ponto, curva de acumulação, dissimilaridade entre pontos, composição taxonômica e a comparação eDNA × tradicional em `runs/<timestamp>_ecologia/`, mais um relatório HTML único (`runs/<timestamp>_report.html`) reunindo entrada, cada etapa do determinístico, resultado da LLM e os gráficos ecológicos interativos (ver "Relatório HTML" abaixo).
@@ -107,7 +106,7 @@ Mesma execução do primeiro exemplo, mas com `--ecologia`: além do CSV curado,
 - **Análise ecológica separada, sobre um CSV revisado à mão**
 
 ```bash
-python -m harness --ecologia-somente runs/output_pos_curadoria_LLM-2026-09-15.csv --reference data/example/exemplo_1/spp_tradicional.csv
+python -m harness --ecologia-somente runs/output_pos_curadoria_LLM-2026-09-15.csv --reference data/example/exemplo_1/spp_tradicional.csv --groq-api-key <chave>
 ```
 
 Depois de revisar `Curated ID` manualmente num CSV já curado por uma execução anterior, roda só a análise ecológica sobre essa versão revisada, sem refazer a curadoria. Gera seu próprio log e seu próprio relatório HTML, mais enxuto (sem tabela de entrada nem resumos do determinístico, já que essa execução não rodou essas etapas, ver "Relatório HTML").
@@ -121,11 +120,15 @@ O relatório sempre descreve só o que aquela execução específica fez, nunca 
 - **Execução completa** (`--ecologia`): identificação do projeto e pesquisador, resumo geral dos metadados, tabela de entrada bruta, resumo de cada etapa da curadoria determinística, tabela de saída do determinístico, resultado da curadoria assistida por LLM (mesmo conteúdo do relatório narrativo), tabela final, e os gráficos interativos da análise ecológica.
 - **`--ecologia-somente`**: um aviso destacado no topo, deixando claro que essa análise partiu de um CSV já curado por uma execução anterior, possivelmente revisado à mão, sem refazer a curadoria; a tabela usada; e os gráficos interativos.
 
-## Configuração da chave da Groq
+## Configuração da chave da Groq LLM
 
-A chave usada pela curadoria assistida e pelo relatório narrativo é resolvida nesta ordem: `--groq-api-key` na chamada, senão a variável de ambiente `GROQ_API_KEY`, senão o arquivo `.env` local, senão a etapa é pulada automaticamente. `.env.example` documenta o formato esperado, sem conter uma chave real; copie para `.env` e preencha com a sua própria chave (gratuita em [console.groq.com/keys](https://console.groq.com/keys)) para uso local. `.env` nunca é commitado (está no `.gitignore`).
+A curadoria assistida e o relatório narrativo usam o modelo LLM Groq. Para que funcione, é necessário fornecer uma api-key com `--groq-api-key`:
 
-`--groq-api-key` é conveniente para uma chamada única, mas fica visível no histórico do terminal; para uso recorrente, prefira a variável de ambiente ou o `.env` local.
+```bash
+python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --groq-api-key <chave>
+```
+
+A chave será fornecida por e-mail, uma vez que não pode ser disponibilizada em repositórios públicos como o GitHub, sob risco de cancelamento.
 
 ## Configuração: `--config`
 
