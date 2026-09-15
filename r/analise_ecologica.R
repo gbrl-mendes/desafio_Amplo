@@ -9,7 +9,25 @@ suppressPackageStartupMessages({
   library(tidyverse)
   library(yaml)
   library(vegan)
+  library(plotly)
+  library(htmlwidgets)
+  library(ggdendro)
 })
+
+if (!rmarkdown::pandoc_available() && requireNamespace("pandoc", quietly = TRUE)) {
+  portable_pandoc <- tryCatch(pandoc::pandoc_locate(), error = function(e) "")
+  if (nzchar(portable_pandoc)) {
+    Sys.setenv(RSTUDIO_PANDOC = portable_pandoc)
+  }
+}
+if (!rmarkdown::pandoc_available()) {
+  warning(
+    "Pandoc nao encontrado -- graficos interativos (HTML) serao pulados, ",
+    "os PNGs continuam sendo gerados normalmente. Rode Rscript r/install_packages.R ",
+    "para instalar um Pandoc portatil.",
+    call. = FALSE
+  )
+}
 
 get_repo_root <- function() {
   cli_args <- commandArgs(trailingOnly = FALSE)
@@ -212,11 +230,14 @@ compute_beta_dissimilarity <- function(group_taxon_wide, method = "bray") {
   list(dist = dist_mat, hclust = stats::hclust(dist_mat, method = "average"))
 }
 
-save_dendrogram_plot <- function(beta_result, path, group_col) {
-  if (is.null(beta_result)) return(invisible(NULL))
-  grDevices::png(path, width = 1600, height = 1000, res = 150)
-  on.exit(grDevices::dev.off())
-  plot(beta_result$hclust, main = sprintf("Dissimilaridade entre %s", group_col), xlab = group_col, sub = "")
+plot_dendrogram <- function(beta_result, group_col) {
+  if (is.null(beta_result)) return(NULL)
+  ggdendro::ggdendrogram(beta_result$hclust, rotate = FALSE) +
+    ggplot2::labs(
+      title = sprintf("Dissimilaridade entre %s", group_col),
+      x = group_col, y = "Distância"
+    ) +
+    ggplot2::theme_minimal()
 }
 
 compute_taxonomic_composition <- function(df, eco_config) {
@@ -313,6 +334,20 @@ compare_edna_traditional <- function(df, traditional_df, eco_config) {
     dplyr::arrange(Taxon)
 }
 
+save_interactive_plot <- function(plot, path) {
+  if (is.null(plot)) return(invisible(NULL))
+  if (!rmarkdown::pandoc_available()) {
+    return(invisible(NULL))  # aviso ja dado uma vez no setup (secao 1)
+  }
+  htmlwidgets::saveWidget(plotly::ggplotly(plot), path, selfcontained = TRUE)
+  # saveWidget cria uma pasta "<nome>_files" como etapa intermediaria e o
+  # Pandoc embute o conteudo dela direto no HTML (confirmado: o HTML final
+  # nao referencia mais essa pasta) -- limpa o que sobra pra nao poluir
+  # o diretorio de saida com uma copia duplicada de bibliotecas JS.
+  sidecar_dir <- sub("\\.html$", "_files", path)
+  if (dir.exists(sidecar_dir)) unlink(sidecar_dir, recursive = TRUE)
+}
+
 run_ecological_analysis <- function(input_path, config_path = NULL, reference_path = NULL, output_dir) {
   eco_config <- load_eco_config(config_path)$ecologia
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
@@ -330,14 +365,18 @@ run_ecological_analysis <- function(input_path, config_path = NULL, reference_pa
   cat("\n[2/6] Diversidade alfa (riqueza, Shannon, Simpson)...\n")
   alpha <- compute_alpha_diversity(group_wide, group_col)
   readr::write_csv2(alpha, file.path(output_dir, "diversidade_alfa.csv"))
-  ggplot2::ggsave(file.path(output_dir, "diversidade_alfa.png"), plot_alpha_diversity(alpha, group_col), width = 20, height = 12, units = "cm", dpi = 150)
+  alpha_plot <- plot_alpha_diversity(alpha, group_col)
+  ggplot2::ggsave(file.path(output_dir, "diversidade_alfa.png"), alpha_plot, width = 20, height = 12, units = "cm", dpi = 150)
+  save_interactive_plot(alpha_plot, file.path(output_dir, "diversidade_alfa.html"))
 
   cat("\n[3/6] Curva de acumulacao (esforco amostral)...\n")
   curva <- compute_accumulation_curve(df, eco_config)
   if (!is.null(curva$geral)) readr::write_csv2(curva$geral, file.path(output_dir, "curva_acumulacao_geral.csv"))
   if (!is.null(curva$por_grupo)) {
     readr::write_csv2(curva$por_grupo, file.path(output_dir, "curva_acumulacao_por_grupo.csv"))
-    ggplot2::ggsave(file.path(output_dir, "curva_acumulacao.png"), plot_accumulation_curve(curva$por_grupo, group_col), width = 20, height = 12, units = "cm", dpi = 150)
+    curva_plot <- plot_accumulation_curve(curva$por_grupo, group_col)
+    ggplot2::ggsave(file.path(output_dir, "curva_acumulacao.png"), curva_plot, width = 20, height = 12, units = "cm", dpi = 150)
+    save_interactive_plot(curva_plot, file.path(output_dir, "curva_acumulacao.html"))
   }
 
   cat("\n[4/6] Dissimilaridade entre pontos (beta diversidade)...\n")
@@ -346,14 +385,18 @@ run_ecological_analysis <- function(input_path, config_path = NULL, reference_pa
     dist_df <- as.data.frame(as.matrix(beta$dist))
     dist_df <- tibble::rownames_to_column(dist_df, group_col)
     readr::write_csv2(dist_df, file.path(output_dir, "dissimilaridade.csv"))
-    save_dendrogram_plot(beta, file.path(output_dir, "dissimilaridade_dendrograma.png"), group_col)
+    dendro_plot <- plot_dendrogram(beta, group_col)
+    ggplot2::ggsave(file.path(output_dir, "dissimilaridade_dendrograma.png"), dendro_plot, width = 16, height = 10, units = "cm", dpi = 150)
+    save_interactive_plot(dendro_plot, file.path(output_dir, "dissimilaridade_dendrograma.html"))
   }
 
   cat("\n[5/6] Composicao taxonomica e taxa exclusivos/compartilhados...\n")
   composicao <- compute_taxonomic_composition(df, eco_config)
   if (!is.null(composicao)) {
     readr::write_csv2(composicao, file.path(output_dir, "composicao_taxonomica.csv"))
-    ggplot2::ggsave(file.path(output_dir, "composicao_taxonomica.png"), plot_taxonomic_composition(composicao, eco_config), width = 22, height = 14, units = "cm", dpi = 150)
+    composicao_plot <- plot_taxonomic_composition(composicao, eco_config)
+    ggplot2::ggsave(file.path(output_dir, "composicao_taxonomica.png"), composicao_plot, width = 22, height = 14, units = "cm", dpi = 150)
+    save_interactive_plot(composicao_plot, file.path(output_dir, "composicao_taxonomica.html"))
   }
   exclusivos <- compute_shared_exclusive_taxa(group_wide, group_col)
   readr::write_csv2(exclusivos, file.path(output_dir, "taxa_exclusivos_compartilhados.csv"))

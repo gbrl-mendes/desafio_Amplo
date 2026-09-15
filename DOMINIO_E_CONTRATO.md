@@ -1,3 +1,5 @@
+# Domínio e Contrato do Sistema
+
 ## O problema
 
 Uma empresa de consultoria ambiental atende clientes com diferentes demandas de monitoramento por metabarcoding: identificar quais organismos existem numa área a partir do DNA presente em amostras coletadas ali (água, solo, raízes, dependendo do grupo de interesse do cliente). A cientista de dados da consultoria é quem recebe o resultado bruto do sequenciamento de cada projeto e precisa transformá-lo numa base de dados confiável sobre quais organismos foram detectados.
@@ -17,7 +19,7 @@ Cabe à cientista de dados decidir, para cada sequência de DNA da tabela:
 3. Se o tamanho da sequência é compatível com o marcador genético usado no sequenciamento.
 4. Quando essas três decisões não dão uma resposta clara sozinhas, uma segunda camada, com apoio de um modelo de linguagem, avalia a plausibilidade biológica e geográfica da identificação usando evidência adicional: sequências parecidas dentro do próprio lote, registros de ocorrência pública da espécie na região (GBIF), e espécimes já coletados fisicamente na mesma área em campanhas anteriores, quando disponível (segundo input opcional, formato descrito em "Domínio e família de dados").
 
-O resultado é uma base de dados curada: a identificação de cada sequência, por ponto de coleta, com o nível de confiança de cada identificação e a evidência que a sustenta. É essa base que embasa o relatório técnico entregue ao cliente de cada projeto.
+O resultado é uma base de dados curada: a identificação de cada sequência, por ponto de coleta, com o nível de confiança de cada identificação e a evidência que a sustenta. É essa base que embasa o relatório técnico entregue ao cliente de cada projeto, e que opcionalmente alimenta uma análise ecológica de comunidade sobre os mesmos dados (ver "Saídas previstas").
 
 ## O usuário do resultado
 
@@ -41,4 +43,47 @@ Dois exemplos reais de domínios diferentes demonstram essa generalidade:
 
 Nomes de coluna diferentes dos esperados (outro pipeline de origem, outra convenção de laboratório) são resolvidos por `colunas_alias` no `--config`, sem precisar editar o CSV. Grupos taxonômicos além dos já registrados (peixes, plantas, bentos, zooplâncton, fitoplâncton, perifíton) podem ser adicionados ao registro interno conforme necessário.
 
-**Segundo input, opcional:** tabela de espécies obtidas por métodos tradicionais de monitoramento (não metabarcoding) nos mesmos pontos amostrais, usada só como evidência adicional na camada assistida por LLM (decisão 4 acima); nunca entra na curadoria determinística. CSV `;`-delimitado, UTF-8, uma linha por combinação espécie×ponto, pelo menos 2 colunas (ponto amostral na primeira; taxon na última, ou numa coluna chamada `Taxon_binomial` se houver colunas extras no meio). Exemplos em [`data/example/exemplo_1/spp_tradicional.csv`](data/example/exemplo_1/spp_tradicional.csv) e [`data/example/exemplo_2/roots_metabar_spp_tradicional.csv`](data/example/exemplo_2/roots_metabar_spp_tradicional.csv). Repassado via `--reference` (ver README). Sem essa tabela, a curadoria assistida roda normalmente, só sem essa evidência extra.
+**Segundo input, opcional:** tabela de espécies obtidas por métodos tradicionais de monitoramento (não metabarcoding) nos mesmos pontos amostrais, usada só como evidência adicional na camada assistida por LLM (decisão 4 acima) e, opcionalmente, na análise ecológica (comparação direta entre os dois métodos). Nunca entra na curadoria determinística. CSV `;`-delimitado, UTF-8, uma linha por combinação espécie×ponto, pelo menos 2 colunas (ponto amostral na primeira; taxon na última, ou numa coluna chamada `Taxon_binomial` se houver colunas extras no meio). Exemplos em [`data/example/exemplo_1/spp_tradicional.csv`](data/example/exemplo_1/spp_tradicional.csv) e [`data/example/exemplo_2/roots_metabar_spp_tradicional.csv`](data/example/exemplo_2/roots_metabar_spp_tradicional.csv). Repassado via `--reference` (ver README). Sem essa tabela, a curadoria assistida e a análise ecológica rodam normalmente, só sem essa evidência extra.
+
+## Saídas previstas
+
+Um CSV final (mesmo formato de entrada), com as colunas reordenadas para compatibilidade com o formato histórico do projeto (colunas em comum na mesma posição; colunas renomeadas tratadas como equivalentes; colunas novas no final, ver `finalize_output_columns` no `curadoria_deterministica.qmd`), contendo:
+
+- **Determinísticas** (R): `BLAST ID`, `Identification`, `Identification Max. taxonomy`, `BLASTn pseudo-score`, `Contamination status`, `Primer expected length`, `Possible target taxon`, taxonomia NCBI completa (Gênero a Superreino), `Vizinhos filogenéticos (k)`, `GBIF regional occurrence count`, `FC to Ext/Filt control`, `Control presence`.
+- **Assistidas por LLM** (Python + Groq, opcional): `Assisted ID (LLM)`, `Assisted Confidence (LLM)`, `Assisted Justification (LLM)`, preenchidas apenas para as sequências cuja identificação determinística não foi conclusiva. Nunca sobrescrevem as colunas acima.
+- **`Curated ID`**: pré-preenchida automaticamente pelo sistema (`Assisted ID (LLM)` quando existir, senão a identificação determinística `Identification`), mesmo com `--llm-mode=off`. É a mesma coluna que, no fluxo tradicional deste tipo de projeto, um especialista humano preencheria à mão antes de qualquer análise ecológica; aqui já vem como sugestão de trabalho pronta, que o profissional pode revisar e sobrescrever livremente antes de prosseguir, ou aceitar como está e seguir direto para a análise ecológica (`--ecologia`, ver abaixo).
+- Um **log JSON por execução** (`runs/<timestamp>.json`): status (recusado, sucesso ou falha), resumo da validação, o que a curadoria assistida revisou, avisos e erros. Serve para reconstruir depois o que foi feito e por quê, sem precisar reexecutar nada.
+- Um **relatório narrativo por execução** (`runs/<timestamp>_relatorio.md`, opcional, mesmo interruptor `--llm-mode`): síntese em markdown do que essa execução encontrou (contexto, contagens por categoria, casos concretos em que a curadoria assistida divergiu da determinística, limitações). Gerado por LLM sobre agregados já calculados em Python (`harness/report_generation.py`); nunca lê a tabela bruta nem inventa número fora do que foi computado.
+- **Análise ecológica** (R, opcional via `--ecologia`, roda sobre `Curated ID` e nunca refaz identificação nenhuma): riqueza observada, diversidade Shannon e Simpson, curva de acumulação por esforço amostral, dissimilaridade entre pontos (Bray-Curtis ou Jaccard), composição taxonômica por rank configurável, taxa exclusivos e compartilhados entre pontos, e, quando `--reference` foi informado, uma comparação direta entre o que o eDNA detectou e o que os métodos tradicionais já haviam registrado. Tabelas em CSV e gráficos em PNG, gravados em `runs/<timestamp>_ecologia/`. Quando a análise ecológica roda, um relatório HTML único também é gerado (ver README, seção "Relatório HTML").
+
+## Fora de escopo
+
+- **Determinar a "verdade" definitiva de uma identificação:** o sistema reporta confiança e justificativa, nunca certeza absoluta. Divergências encontradas entre diferentes fontes reais usadas para calibrar o sistema foram documentadas, não escondidas sob uma resposta forçada. Cabe aos profissionais que analisarem esses dados a decisão final sobre quais identificações são as mais parcimoniosas.
+- **Dado fora da família declarada**, sem ajuste de configuração: por exemplo outro tipo de marcador genético, outro grupo taxonômico alvo sem declarar o grupo correspondente em `taxons_alvo`, ou faixa de tamanho de sequência de outro marcador sem declarar em `amplicon_por_primer`.
+- **Validação formal contra o gabarito histórico do projeto** (o `Curated ID` e a `Obs. Curadoria` já revisados por um especialista humano na planilha mestre original de cada projeto): o sistema pré-preenche sua própria versão de `Curated ID` como sugestão de trabalho (ver "Saídas previstas"), mas essa versão nunca é comparada, dentro deste repositório, contra o gabarito humano real. Essa comparação, quando feita, acontece externamente, e o gabarito histórico nunca é lido como entrada por este sistema.
+
+## Principais riscos e mecanismos de validação
+
+| Risco | Mecanismo de mitigação |
+|---|---|
+| Vazamento de gabarito ou de colunas derivadas por outro pipeline | `tools/schema_validation.py` recusa a entrada (bloqueante) se colunas `derived_recompute`/`gabarito` estiverem presentes. |
+| Entrada com colunas obrigatórias ausentes, chave primária duplicada | Mesma validação, com relatório específico de quais colunas e linhas falharam. A execução é recusada antes de rodar qualquer coisa determinística. |
+| Bug documentado do pipeline de referência (múltiplos controles numa célula separados por `;`) | Validado explicitamente como aviso, não bloqueante, sinalizado no relatório em vez de quebrar silenciosamente um cruzamento de dados. |
+| Dependência externa ausente ou instável (R, pacotes, NCBI, GBIF, Groq) | Degradação graciosa em cada camada: o harness reporta `failed` com motivo claro se o R não roda; a curadoria assistida por LLM cai para `off` sozinha sem chave configurada, sem derrubar o resultado determinístico já validado; a análise ecológica, se falhar, não invalida a curadoria já concluída. |
+| Resultado do R incompleto ou corrompido apesar de exit code 0 | Verificação pós-execução (`verify_output`): confere número de linhas e presença das colunas centrais antes de declarar sucesso. |
+| Catálogo de modelo de LLM muda (a Groq já descontinuou o modelo usado inicialmente durante o desenvolvimento) | Modelo e chave são configuráveis via `--groq-model`/`--groq-api-key`, variável de ambiente ou `.env`, não fixos na lógica; falha numa consulta específica não derruba as demais (nova tentativa com espera progressiva, erro registrado individualmente). |
+| Confiar demais na camada de LLM | A skill só é acionada para sequências cuja identificação determinística não foi conclusiva (não chegou a espécie, hit não confiável, ou espécie sem registro regional no GBIF). Identificações já confiáveis nunca passam pelo LLM, e a saída sempre cita a evidência determinística usada no raciocínio. |
+| Parâmetros de curadoria (faixa de tamanho de sequência, limiares de pseudo-score, número de vizinhos na árvore) sem calibração real | Fechados contra dados reais do projeto (árvore filogenética e tabela de curadoria do orientador, TCC da Isadora) em vez de estimados. Ver `r/curadoria_deterministica.qmd`, seção a seção, para o raciocínio de cada parâmetro. |
+| Lista de espécimes de campanhas anteriores incompleta ou sem cobertura em todos os pontos | Tratada como evidência a favor, nunca como lista fechada; ausência de registro num ponto sem cobertura tradicional (ex. um ponto sem nenhum espécime catalogado) não é tratada como ausência da espécie, só como falta de dado de comparação. |
+| `Curated ID` pré-preenchida pelo sistema confundida com validação humana real | Documentado explicitamente como sugestão de trabalho em "Saídas previstas" e "Fora de escopo"; a comparação formal contra o gabarito histórico do projeto acontece fora deste repositório, nunca como parte da execução do sistema. |
+| Chave da API da Groq exposta no repositório ou em texto claro num log | `.env` nunca é commitado (`.gitignore`), só `.env.example` (sem chave real); `--groq-api-key`/variável de ambiente têm prioridade sobre `.env`; nenhum log grava a chave em texto claro. |
+
+## Ponto de entrada e execução
+
+Ver [README](README.md) para instalação, dependências e exemplo de execução. Em resumo:
+
+```bash
+python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia
+```
+
+Um segundo exemplo, de outro domínio (raízes, primer ITS2, plantas, sem latitude/longitude), está em [`data/example/exemplo_2/`](data/example/exemplo_2/), com o `--config` correspondente já pronto (ver README para o comando completo).

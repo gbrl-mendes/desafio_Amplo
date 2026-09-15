@@ -207,6 +207,25 @@ def test_run_llm_assisted_curation_live_without_key_degrades_to_off(monkeypatch)
     assert "GROQ_API_KEY" in (result.skipped_reason or "")
 
 
+def test_run_llm_assisted_curation_explicit_api_key_takes_priority_over_env(monkeypatch):
+    # --groq-api-key (repassado aqui como api_key=...) tem prioridade sobre
+    # GROQ_API_KEY do ambiente -- prova isso configurando os dois com valores
+    # diferentes e conferindo qual chave chega no caller.
+    monkeypatch.setenv("GROQ_API_KEY", "chave-do-ambiente")
+    monkeypatch.setattr("harness.llm_curation.load_env", lambda *a, **k: {})
+    df = _make_df([_base_row(**{"Identification Max. taxonomy": "Genus"})])
+
+    captured = {}
+
+    def fake_caller(prompt, api_key, model):
+        captured["api_key"] = api_key
+        return {"assisted_id": "x", "assisted_confidence": "baixa", "assisted_justification": "y"}
+
+    run_llm_assisted_curation(df, mode="live", api_key="chave-explicita", caller=fake_caller)
+
+    assert captured["api_key"] == "chave-explicita"
+
+
 def test_run_llm_assisted_curation_reviews_only_uncertain_asvs_and_propagates():
     rows = [
         _base_row(Sample="SC1A", **{"ASV header": ">ASV_confiavel"}),

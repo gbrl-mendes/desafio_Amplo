@@ -17,6 +17,7 @@ suppressPackageStartupMessages({
   library(DECIPHER)
   library(ape)
   library(rgbif)
+  library(jsonlite)
 })
 
 get_repo_root <- function() {
@@ -120,6 +121,20 @@ load_config <- function(config_path = NULL, defaults = DEFAULT_CONFIG) {
   }
 
   merged
+}
+
+pipeline_diagnostics <- new.env()
+pipeline_diagnostics$etapas <- list()
+
+diag_add <- function(etapa, dados) {
+  pipeline_diagnostics$etapas[[etapa]] <- dados
+}
+
+format_counts <- function(x, na_label = "sem dado") {
+  tab <- table(x, useNA = "always")
+  labels <- names(tab)
+  labels[is.na(labels)] <- na_label
+  paste(sprintf("%s: %d", labels, as.integer(tab)), collapse = ", ")
 }
 
 read_schema <- function(schema_path = SCHEMA_PATH) {
@@ -300,9 +315,15 @@ clean_species_names <- function(df) {
 
 run_blast_refinement <- function(df) {
   cat("\n[2/6] Refinamento dos hits de BLAST: escolhendo o melhor hit por sequencia...\n")
-  df %>%
+  df <- df %>%
     select_best_blast_hit() %>%
     clean_species_names()
+  diag_add("refinamento_hits", list(
+    selected_hit_origin = format_counts(df$Selected_Hit_Origin),
+    match_not_reliable_count = sum(df$`BLAST ID` == "Match_not_reliable"),
+    total_linhas = nrow(df)
+  ))
+  df
 }
 
 TAXONOMY_RANKS <- c(
@@ -535,7 +556,11 @@ flag_contamination <- function(df, fold_change_threshold = 10) {
 run_taxonomy_and_contamination <- function(df, config = DEFAULT_CONFIG, entrez_key = NULL) {
   cat("\n[3/6] Taxonomia NCBI + contaminacao: consultando taxonomia e calculando Fold Change...\n")
   df <- run_taxonomy_lookup(df, entrez_key = entrez_key)
-  flag_contamination(df, fold_change_threshold = config$contaminacao$fold_change_threshold)
+  df <- flag_contamination(df, fold_change_threshold = config$contaminacao$fold_change_threshold)
+  diag_add("taxonomia_contaminacao", list(
+    contamination_status = format_counts(df$`Contamination status`)
+  ))
+  df
 }
 
 resolve_amplicon_ranges <- function(df, amplicon_por_primer) {
@@ -712,10 +737,17 @@ flag_target_taxa <- function(df, grupos, registry = TARGET_TAXA_REGISTRY) {
 
 run_final_curation <- function(df, config = DEFAULT_CONFIG) {
   cat("\n[4/6] Curadoria final: faixa de amplicon, pseudo-score e taxons-alvo...\n")
-  df %>%
+  df <- df %>%
     flag_amplicon_length(config$amplicon_por_primer) %>%
     compute_pseudoscore_and_identification(config$identificacao$pseudoscore_thresholds) %>%
     flag_target_taxa(config$taxons_alvo$grupos)
+  diag_add("curadoria_final", list(
+    primer_expected_length = format_counts(df$`Primer expected length`),
+    identification_max_taxonomy = format_counts(df$`Identification Max. taxonomy`),
+    taxons_alvo_grupos = paste(config$taxons_alvo$grupos, collapse = ", "),
+    possible_target_taxon = format_counts(df$`Possible target taxon`)
+  ))
+  df
 }
 
 dnastringset_to_dnabin <- function(dna_stringset) {
@@ -783,8 +815,13 @@ run_phylogenetic_tree <- function(df, config = DEFAULT_CONFIG) {
   tree <- build_asv_tree(df, config$amplicon_por_primer)
   neighbors <- extract_k_neighbors(tree, k = config$arvore_filogenetica$k_vizinhos)
 
-  df %>%
+  df <- df %>%
     dplyr::left_join(neighbors, by = "ASV header")
+  diag_add("arvore_filogenetica", list(
+    vizinhos_calculados = sum(!is.na(df$`Vizinhos filogeneticos (k)`)),
+    total_linhas = nrow(df)
+  ))
+  df
 }
 
 compute_area_bbox <- function(df, config) {
@@ -845,7 +882,11 @@ run_regional_check <- function(df, config = DEFAULT_CONFIG) {
       "(sem implementacao alternativa ainda).",
       call. = FALSE
     )
-    return(dplyr::mutate(df, `GBIF regional occurrence count` = NA_integer_))
+    df <- dplyr::mutate(df, `GBIF regional occurrence count` = NA_integer_)
+    diag_add("checagem_regional", list(
+      gbif_consultadas = 0L, pulada = TRUE, motivo = "checagem_regional$fonte != 'gbif'"
+    ))
+    return(df)
   }
 
   area_bbox <- compute_area_bbox(df, config)
@@ -855,7 +896,12 @@ run_regional_check <- function(df, config = DEFAULT_CONFIG) {
       "checagem regional pulada.",
       call. = FALSE
     )
-    return(dplyr::mutate(df, `GBIF regional occurrence count` = NA_integer_))
+    df <- dplyr::mutate(df, `GBIF regional occurrence count` = NA_integer_)
+    diag_add("checagem_regional", list(
+      gbif_consultadas = 0L, pulada = TRUE,
+      motivo = "sem area_bbox declarada e sem Latitude/Longitude nos dados"
+    ))
+    return(df)
   }
 
   wkt <- bbox_to_wkt(area_bbox)
@@ -867,8 +913,12 @@ run_regional_check <- function(df, config = DEFAULT_CONFIG) {
       `GBIF regional occurrence count` = purrr::map_int(Identification, gbif_regional_count, wkt = wkt)
     )
 
-  df %>%
+  df <- df %>%
     dplyr::left_join(species_lookup, by = "Identification")
+  diag_add("checagem_regional", list(
+    gbif_consultadas = sum(!is.na(df$`GBIF regional occurrence count`)), pulada = FALSE
+  ))
+  df
 }
 
 ORIGINAL_LONG_COLUMN_ORDER <- c(
@@ -960,13 +1010,6 @@ parse_cli_args <- function(args) {
   list(input = positional[1], config = config_path, output = output_path)
 }
 
-format_counts <- function(x, na_label = "sem dado") {
-  tab <- table(x, useNA = "always")
-  labels <- names(tab)
-  labels[is.na(labels)] <- na_label
-  paste(sprintf("%s: %d", labels, as.integer(tab)), collapse = ", ")
-}
-
 main <- function(args) {
   parsed <- parse_cli_args(args)
   config <- load_config(parsed$config)
@@ -980,30 +1023,36 @@ main <- function(args) {
   df <- run_regional_check(df, config = config)
   df <- finalize_output_columns(df)
 
+  etapas <- pipeline_diagnostics$etapas
+
   cat(sprintf("Tabela parseada: %d linhas, %d colunas.\n", nrow(df), ncol(df)))
   cat("Colunas calculadas localmente: ASV Size (pb), Sample total abundance, ASV header.\n")
-  cat(sprintf("Origem do hit selecionado (Selected_Hit_Origin): %s\n", format_counts(df$Selected_Hit_Origin)))
+  cat(sprintf("Origem do hit selecionado (Selected_Hit_Origin): %s\n", etapas$refinamento_hits$selected_hit_origin))
   cat(sprintf(
     "BLAST ID = 'Match_not_reliable' em %d de %d linhas.\n",
-    sum(df$`BLAST ID` == "Match_not_reliable"), nrow(df)
+    etapas$refinamento_hits$match_not_reliable_count, etapas$refinamento_hits$total_linhas
   ))
-  cat(sprintf("Status de contaminacao: %s\n", format_counts(df$`Contamination status`)))
-  cat(sprintf("Faixa de amplicon (Primer expected length): %s\n", format_counts(df$`Primer expected length`)))
-  cat(sprintf("Identificacao maxima (Identification Max. taxonomy): %s\n", format_counts(df$`Identification Max. taxonomy`)))
-  cat(sprintf("Grupos de taxons-alvo configurados: %s\n", paste(config$taxons_alvo$grupos, collapse = ", ")))
-  cat(sprintf("Possible target taxon: %s\n", format_counts(df$`Possible target taxon`)))
+  cat(sprintf("Status de contaminacao: %s\n", etapas$taxonomia_contaminacao$contamination_status))
+  cat(sprintf("Faixa de amplicon (Primer expected length): %s\n", etapas$curadoria_final$primer_expected_length))
+  cat(sprintf("Identificacao maxima (Identification Max. taxonomy): %s\n", etapas$curadoria_final$identification_max_taxonomy))
+  cat(sprintf("Grupos de taxons-alvo configurados: %s\n", etapas$curadoria_final$taxons_alvo_grupos))
+  cat(sprintf("Possible target taxon: %s\n", etapas$curadoria_final$possible_target_taxon))
   cat(sprintf(
     "Vizinhos filogeneticos calculados para %d de %d linhas (NA = ASV abaixo do piso de tamanho).\n",
-    sum(!is.na(df$`Vizinhos filogeneticos (k)`)), nrow(df)
+    etapas$arvore_filogenetica$vizinhos_calculados, etapas$arvore_filogenetica$total_linhas
   ))
   cat(sprintf(
     "Checagem regional GBIF: %d linhas com identificacao em nivel de especie consultadas.\n",
-    sum(!is.na(df$`GBIF regional occurrence count`))
+    etapas$checagem_regional$gbif_consultadas
   ))
 
   if (!is.null(parsed$output)) {
     readr::write_csv2(df, parsed$output)
     cat(sprintf("Tabela parseada salva em: %s\n", parsed$output))
+
+    diagnostics_path <- sub("\\.csv$", "_diagnostics.json", parsed$output)
+    jsonlite::write_json(etapas, diagnostics_path, auto_unbox = TRUE, pretty = TRUE, na = "null")
+    cat(sprintf("Diagnosticos estruturados salvos em: %s\n", diagnostics_path))
   }
 
   invisible(df)

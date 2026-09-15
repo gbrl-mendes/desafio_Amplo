@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import pandas as pd
+import yaml
 
 from harness.llm_curation import (
     LlmCurationResult,
@@ -54,7 +55,8 @@ from harness.progress import (
     format_checkpoint_summary,
     format_input_summary,
 )
-from harness.report_generation import ReportContext, ReportGenerationResult, generate_report
+from harness.html_report import build_html_report
+from harness.report_generation import ReportContext, ReportGenerationResult, build_report_stats, generate_report
 from tools.schema_validation import load_column_aliases, load_schema, validate_asv_table
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -101,6 +103,11 @@ class RunResult:
     ecologia_output_dir: Optional[str] = None
     ecologia_exit_code: Optional[int] = None
     ecologia_error: Optional[str] = None
+    tipo_execucao: str = "completo"  # "completo" | "ecologia_somente"
+    config_path: Optional[str] = None
+    reference_path: Optional[str] = None
+    diagnostics_path: Optional[str] = None
+    html_report_path: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -129,6 +136,15 @@ def find_rscript() -> Optional[str]:
 def _tail(text: str, n_lines: int = 30) -> str:
     lines = text.splitlines()
     return "\n".join(lines[-n_lines:])
+
+
+def _first_value(df: pd.DataFrame, column: str) -> Optional[str]:
+    """Primeiro valor nao nulo de uma coluna, se ela existir -- usado pro
+    cabecalho do relatorio HTML (Researcher/Project/Primer), que assume so
+    o caso comum de um valor unico por execucao sem validar isso."""
+    if column not in df.columns or df[column].dropna().empty:
+        return None
+    return str(df[column].dropna().iloc[0])
 
 
 RScriptRunner = Callable[..., subprocess.CompletedProcess]
@@ -273,6 +289,8 @@ def run(
     assume_yes: bool = False,
     ecologia: bool = False,
     eco_runner: EcoRunner = default_eco_runner,
+    groq_api_key: Optional[str] = None,
+    groq_model: Optional[str] = None,
 ) -> RunResult:
     """Executa uma rodada completa: resumo da entrada -> valida -> roda o R
     (saida ao vivo) -> verifica -> checkpoint -> curadoria assistida por LLM
@@ -319,6 +337,11 @@ def run(
     invalida a curadoria ja concluida e verificada, so fica registrada em
     `ecologia_error`. `eco_runner` e injetavel de proposito, mesmo padrao de
     `r_runner`.
+
+    `groq_api_key`/`groq_model`: repassados tal qual pra `run_llm_assisted_curation`
+    e `generate_report`, que ja resolvem a prioridade internamente (parametro
+    > variavel de ambiente > `.env` > etapa pulada). Util pra quem prefere
+    informar a chave direto na chamada em vez de configurar `.env`.
     """
     input_csv = Path(input_csv)
     config_path = Path(config_path) if config_path else None
@@ -394,8 +417,15 @@ def run(
 
     status = "success" if proc.returncode == 0 and not verification_issues else "failed"
 
+    # Mesma convencao de nome usada por curadoria_deterministica.qmd::main()
+    # pra gravar o diagnostics.json (ver C1) -- ao lado do CSV de saida,
+    # trocando so a extensao. So existe de fato se o R realmente escreveu.
+    diagnostics_candidate = Path(str(output_csv).rsplit(".csv", 1)[0] + "_diagnostics.json")
+    diagnostics_path = str(diagnostics_candidate) if status == "success" and diagnostics_candidate.exists() else None
+
     llm_result = None
     curated_df = None
+    deterministic_df = None
     checkpoint_path = None
     effective_llm_mode = llm_mode
     if status == "success":
@@ -406,6 +436,10 @@ def run(
                 else None
             )
             curated_df = pd.read_csv(output_csv, sep=";", decimal=",", encoding="utf-8")
+            # Guardado antes da etapa de LLM sobrescrever curated_df -- e o
+            # que o relatorio HTML (secao 5, ver harness/html_report.py)
+            # mostra como "saida do determinístico antes da LLM".
+            deterministic_df = curated_df.copy()
 
             # Checkpoint: mostra o que a curadoria deterministica encontrou,
             # grava um log proprio desse trecho, e (so quando --llm-mode=live
@@ -452,7 +486,11 @@ def run(
                 print("\n=== Curadoria assistida por LLM ===")
 
             curated_df, llm_result = run_llm_assisted_curation(
-                curated_df, mode=effective_llm_mode, traditional_species_df=traditional_species_df
+                curated_df,
+                mode=effective_llm_mode,
+                traditional_species_df=traditional_species_df,
+                api_key=groq_api_key,
+                model=groq_model,
             )
             curated_df = add_curated_id_column(curated_df)
             curated_df.to_csv(output_csv, sep=";", decimal=",", index=False, encoding="utf-8")
@@ -465,6 +503,7 @@ def run(
 
     report_text = None
     report_result = None
+    report_stats = None
     if status == "success" and curated_df is not None and llm_result is not None:
         try:
             report_context = ReportContext(
@@ -477,8 +516,15 @@ def run(
                 llm_errors=llm_result.errors,
                 llm_skipped_reason=llm_result.skipped_reason,
             )
+            # Agregados puros (sem LLM) que o relatorio HTML (secao 6, ver
+            # harness/html_report.py) tambem usa pros casos de divergencia --
+            # calculado aqui em vez de so dentro de generate_report() porque
+            # esse ultimo pula o calculo inteiro quando llm_mode == "off".
+            report_stats = build_report_stats(curated_df, report_context)
             print("\n=== Gerando relatorio narrativo ===")
-            report_text, report_result = generate_report(curated_df, report_context, mode=effective_llm_mode)
+            report_text, report_result = generate_report(
+                curated_df, report_context, mode=effective_llm_mode, api_key=groq_api_key, model=groq_model
+            )
         except Exception as exc:
             # Mesma logica de protecao acima: uma falha inesperada na geracao
             # do relatorio nao invalida a curadoria ja concluida e verificada.
@@ -522,6 +568,37 @@ def run(
                 # nao invalida a curadoria (e o LLM) ja concluidos e verificados.
                 ecologia_error = f"Falha inesperada na analise ecologica: {exc}"
 
+    html_report_path = None
+    if ecologia_output_dir is not None:
+        try:
+            html_context = {
+                "tipo_execucao": "completo",
+                "started_at": started_at,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "researcher": _first_value(df, "Researcher"),
+                "project": _first_value(df, "Project"),
+                "primer": _first_value(df, "Primer"),
+                "input_df": df,
+                "diagnostics": json.loads(Path(diagnostics_path).read_text(encoding="utf-8")) if diagnostics_path else None,
+                "deterministic_df": deterministic_df,
+                "report_text": report_text,
+                "llm_divergence_examples": report_stats.get("llm_divergence_examples") if report_stats else [],
+                "llm_reviewed_count": llm_result.reviewed_count if llm_result else None,
+                "llm_total_unique_asvs": llm_result.total_unique_asvs if llm_result else None,
+                "final_df": curated_df,
+                "ecologia_output_dir": ecologia_output_dir,
+                "ecologia_requested": True,
+            }
+            html_text = build_html_report(html_context)
+            html_timestamp = started_at.replace(":", "-").replace("+00-00", "Z")
+            html_file = runs_dir / f"{html_timestamp}_report.html"
+            html_file.write_text(html_text, encoding="utf-8")
+            html_report_path = str(html_file)
+        except Exception:
+            # Mesma logica de protecao das etapas acima: uma falha aqui nao
+            # invalida a curadoria (e a analise ecologica) ja concluidas.
+            html_report_path = None
+
     result = RunResult(
         status=status,
         input_path=str(input_csv),
@@ -546,6 +623,197 @@ def run(
         ecologia_output_dir=ecologia_output_dir,
         ecologia_exit_code=ecologia_exit_code,
         ecologia_error=ecologia_error,
+        config_path=str(config_path) if config_path else None,
+        reference_path=str(traditional_species_csv) if traditional_species_csv else None,
+        diagnostics_path=diagnostics_path,
+        html_report_path=html_report_path,
+    )
+    write_run_log(result, runs_dir)
+    return result
+
+
+# Nomes de coluna que run_ecologia_somente() confere no cabecalho do CSV.
+# Mantido sincronizado manualmente com DEFAULT_ECO_CONFIG$ecologia em
+# r/analise_ecologica.qmd -- se um dia divergirem, este e la sao os dois
+# lugares a atualizar.
+DEFAULT_ECO_CONFIG_COLUMNS = {
+    "coluna_grupo": "Ponto",
+    "coluna_id": "Curated ID",
+    "coluna_abundancia": "ASV absolute abundance",
+}
+
+
+def _load_eco_config_columns(config_path: Optional[Path]) -> dict[str, str]:
+    resolved = dict(DEFAULT_ECO_CONFIG_COLUMNS)
+    if config_path is None:
+        return resolved
+    with open(config_path, encoding="utf-8") as fh:
+        user_config = yaml.safe_load(fh) or {}
+    eco_section = user_config.get("ecologia") or {}
+    resolved.update({k: v for k, v in eco_section.items() if k in resolved})
+    return resolved
+
+
+def _read_csv_header(path: Path) -> list[str]:
+    """Le so a primeira linha do CSV (nunca a tabela inteira) e devolve os
+    nomes de coluna, splitando por `;` -- suficiente pra checar as colunas
+    minimas de `run_ecologia_somente` sem o custo de um `pd.read_csv`
+    completo num arquivo que pode ser grande."""
+    with open(path, encoding="utf-8") as fh:
+        first_line = fh.readline()
+    return [c.strip() for c in first_line.rstrip("\r\n").split(";")]
+
+
+def run_ecologia_somente(
+    curado_csv_path: str | Path,
+    config_path: str | Path | None = None,
+    reference_path: str | Path | None = None,
+    runs_dir: str | Path = DEFAULT_RUNS_DIR,
+    rscript_exe: Optional[str] = None,
+    timeout: int = 1800,
+    eco_runner: EcoRunner = default_eco_runner,
+) -> RunResult:
+    """Roda so a analise ecologica sobre um CSV ja curado por uma execucao
+    anterior (opcionalmente revisado a mao), sem refazer nenhuma etapa de
+    curadoria -- caminho separado de `run()`, mais curto: confere so o
+    cabecalho do CSV (nunca a tabela inteira) e chama `r/analise_ecologica.R`
+    como subprocesso, reaproveitando o mesmo `eco_runner` que a flag
+    `--ecologia` de `run()` ja usa internamente.
+
+    Grava `runs/<timestamp>.json` no mesmo formato dos outros logs, com
+    `tipo_execucao="ecologia_somente"`.
+    """
+    curado_csv_path = Path(curado_csv_path)
+    config_path = Path(config_path) if config_path else None
+    reference_path = Path(reference_path) if reference_path else None
+    runs_dir = Path(runs_dir)
+    started_at = datetime.now(timezone.utc).isoformat()
+
+    def _refused(reason: str) -> RunResult:
+        result = RunResult(
+            status="refused",
+            input_path=str(curado_csv_path),
+            output_path=None,
+            started_at=started_at,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            validation_summary=reason,
+            tipo_execucao="ecologia_somente",
+            config_path=str(config_path) if config_path else None,
+            reference_path=str(reference_path) if reference_path else None,
+        )
+        write_run_log(result, runs_dir)
+        return result
+
+    def _failed(error: str, **extra) -> RunResult:
+        result = RunResult(
+            status="failed",
+            input_path=str(curado_csv_path),
+            output_path=None,
+            started_at=started_at,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            validation_summary="Cabecalho do CSV conferido, colunas minimas presentes.",
+            error=error,
+            tipo_execucao="ecologia_somente",
+            config_path=str(config_path) if config_path else None,
+            reference_path=str(reference_path) if reference_path else None,
+            **extra,
+        )
+        write_run_log(result, runs_dir)
+        return result
+
+    eco_columns = _load_eco_config_columns(config_path)
+    required_columns = [
+        eco_columns["coluna_grupo"],
+        eco_columns["coluna_id"],
+        eco_columns["coluna_abundancia"],
+        "Sample",
+        "Type",
+    ]
+
+    try:
+        header = _read_csv_header(curado_csv_path)
+    except UnicodeDecodeError as exc:
+        return _refused(
+            f"Nao foi possivel ler o cabecalho de '{curado_csv_path}' como UTF-8 ({exc}). "
+            "Causa provavel: o arquivo foi editado num programa que trocou o encoding sem "
+            "perceber -- o formato esperado e sempre UTF-8."
+        )
+    except OSError as exc:
+        return _refused(f"Nao foi possivel ler o arquivo '{curado_csv_path}': {exc}.")
+
+    missing = [c for c in required_columns if c not in header]
+    if len(header) <= 1 or missing:
+        detalhe = (
+            "o cabecalho nao tem nenhum ';' (uma unica coluna encontrada)"
+            if len(header) <= 1
+            else f"coluna(s) ausente(s): {missing}"
+        )
+        return _refused(
+            f"CSV nao tem o formato esperado pela analise ecologica ({detalhe}). Causa "
+            "provavel: o arquivo foi editado num programa que trocou o delimitador "
+            "(esperado ';') ou removeu/renomeou uma coluna sem perceber."
+        )
+
+    resolved_rscript = rscript_exe or find_rscript()
+    if resolved_rscript is None:
+        return _failed(
+            "Rscript nao encontrado no PATH nem nos locais comuns de instalacao. "
+            "Instale R (https://www.r-project.org) ou aponte para o executavel."
+        )
+
+    eco_timestamp = started_at.replace(":", "-").replace("+00-00", "Z")
+    eco_dir = runs_dir / f"{eco_timestamp}_ecologia"
+    print("\n=== Analise ecologica (--ecologia-somente) ===")
+    try:
+        eco_proc = eco_runner(resolved_rscript, curado_csv_path, eco_dir, config_path, reference_path, timeout)
+    except subprocess.TimeoutExpired:
+        return _failed(f"Execucao do R excedeu o timeout de {timeout}s.")
+
+    status = "success" if eco_proc.returncode == 0 else "failed"
+    eco_error = None if status == "success" else f"analise_ecologica.R terminou com codigo {eco_proc.returncode}."
+
+    html_report_path = None
+    if status == "success":
+        try:
+            curated_df = pd.read_csv(curado_csv_path, sep=";", decimal=",", encoding="utf-8")
+            html_context = {
+                "tipo_execucao": "ecologia_somente",
+                "started_at": started_at,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "researcher": _first_value(curated_df, "Researcher"),
+                "project": _first_value(curated_df, "Project"),
+                "primer": _first_value(curated_df, "Primer"),
+                "final_df": curated_df,
+                "ecologia_output_dir": str(eco_dir),
+                "ecologia_requested": True,
+            }
+            html_text = build_html_report(html_context)
+            html_file = runs_dir / f"{eco_timestamp}_report.html"
+            html_file.write_text(html_text, encoding="utf-8")
+            html_report_path = str(html_file)
+        except Exception:
+            # Mesma logica de protecao do resto do modulo: uma falha aqui
+            # nao invalida a analise ecologica ja concluida.
+            html_report_path = None
+
+    result = RunResult(
+        status=status,
+        input_path=str(curado_csv_path),
+        output_path=str(eco_dir) if status == "success" else None,
+        started_at=started_at,
+        finished_at=datetime.now(timezone.utc).isoformat(),
+        validation_summary="Cabecalho do CSV conferido, colunas minimas presentes.",
+        r_exit_code=eco_proc.returncode,
+        r_stdout_tail=_tail(eco_proc.stdout),
+        r_stderr_tail=_tail(eco_proc.stderr),
+        error=eco_error,
+        tipo_execucao="ecologia_somente",
+        config_path=str(config_path) if config_path else None,
+        reference_path=str(reference_path) if reference_path else None,
+        ecologia_output_dir=str(eco_dir) if status == "success" else None,
+        ecologia_exit_code=eco_proc.returncode,
+        ecologia_error=eco_error,
+        html_report_path=html_report_path,
     )
     write_run_log(result, runs_dir)
     return result

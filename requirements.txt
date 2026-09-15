@@ -3,6 +3,7 @@
 pandas==3.0.5
 PyYAML==6.0.3
 requests==2.34.2
+Jinja2==3.1.6
 
 # Dev/testes (tests/, pytest.ini implicito) -- nao necessario so pra rodar
 # `python -m harness`, so pra rodar a suite de testes.

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from harness.orchestrator import run
+from harness.orchestrator import run, run_ecologia_somente
 from tools.schema_validation import load_schema
 
 SCHEMA = load_schema()
@@ -393,6 +393,60 @@ def test_failed_when_rscript_not_found(tmp_path, monkeypatch):
     assert result.error is not None and "Rscript" in result.error
 
 
+def test_groq_api_key_forwarded_to_llm_curation_and_report(tmp_path, monkeypatch):
+    captured = {}
+
+    def _fake_llm_curation(df, mode, traditional_species_df=None, api_key=None, model=None, **kwargs):
+        captured["llm_api_key"] = api_key
+        captured["llm_model"] = model
+        from harness.llm_curation import LlmCurationResult
+
+        return df, LlmCurationResult(mode=mode)
+
+    def _fake_generate_report(df, context, mode, api_key=None, model=None, **kwargs):
+        captured["report_api_key"] = api_key
+        captured["report_model"] = model
+        from harness.report_generation import ReportGenerationResult
+
+        return "relatorio falso", ReportGenerationResult(mode=mode)
+
+    monkeypatch.setattr("harness.orchestrator.run_llm_assisted_curation", _fake_llm_curation)
+    monkeypatch.setattr("harness.orchestrator.generate_report", _fake_generate_report)
+
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="mock",
+        groq_api_key="chave-explicita-teste",
+        groq_model="modelo-explicito-teste",
+    )
+
+    assert result.status == "success"
+    assert captured["llm_api_key"] == "chave-explicita-teste"
+    assert captured["llm_model"] == "modelo-explicito-teste"
+    assert captured["report_api_key"] == "chave-explicita-teste"
+    assert captured["report_model"] == "modelo-explicito-teste"
+
+
+def test_groq_api_key_never_appears_in_clear_text_in_run_log(tmp_path):
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="mock",
+        groq_api_key="segredo-nao-pode-vazar-no-log",
+    )
+
+    assert result.status == "success"
+    log_files = list((tmp_path / "runs").glob("*.json"))
+    assert log_files
+    for log_file in log_files:
+        assert "segredo-nao-pode-vazar-no-log" not in log_file.read_text(encoding="utf-8")
+
+
 def _fake_eco_runner_success(rscript_exe, curated_csv, output_dir, config_path, traditional_species_csv, timeout):
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "diversidade_alfa.csv").write_text("Ponto;Riqueza observada\nSC1;1\n", encoding="utf-8")
@@ -458,3 +512,131 @@ def test_ecologia_failure_does_not_invalidate_successful_curation(tmp_path):
     assert result.output_path is not None
     assert result.ecologia_output_dir is None
     assert result.ecologia_error is not None and "falha simulada" in result.ecologia_error
+
+
+def _write_curated_csv(tmp_path: Path, columns: list[str] | None = None) -> Path:
+    cols = columns if columns is not None else ["Ponto", "Sample", "Type", "Curated ID", "ASV absolute abundance"]
+    path = tmp_path / "curado.csv"
+    header = ";".join(cols)
+    row = ";".join("SC1" if c == "Ponto" else "SC1A" if c == "Sample" else "Sample" if c == "Type"
+                    else "Astyanax lacustris" if c == "Curated ID" else "100" for c in cols)
+    path.write_text(f"{header}\n{row}\n", encoding="utf-8")
+    return path
+
+
+def test_ecologia_somente_success_writes_log_with_tipo_execucao(tmp_path):
+    curado_csv = _write_curated_csv(tmp_path)
+    runs_dir = tmp_path / "runs"
+
+    result = run_ecologia_somente(
+        curado_csv,
+        runs_dir=runs_dir,
+        rscript_exe="rscript-fake",
+        eco_runner=_fake_eco_runner_success,
+    )
+
+    assert result.status == "success"
+    assert result.tipo_execucao == "ecologia_somente"
+    assert result.ecologia_output_dir is not None
+    log_files = list(runs_dir.glob("*.json"))
+    assert log_files
+    log_data = json.loads(log_files[0].read_text(encoding="utf-8"))
+    assert log_data["tipo_execucao"] == "ecologia_somente"
+    assert log_data["input_path"] == str(curado_csv)
+
+
+def test_ecologia_somente_refuses_when_curated_id_missing(tmp_path):
+    curado_csv = _write_curated_csv(tmp_path, columns=["Ponto", "Sample", "Type", "ASV absolute abundance"])
+
+    result = run_ecologia_somente(
+        curado_csv,
+        runs_dir=tmp_path / "runs",
+        rscript_exe="rscript-fake",
+        eco_runner=_fake_eco_runner_success,
+    )
+
+    assert result.status == "refused"
+    assert "Curated ID" in result.validation_summary
+
+
+def test_ecologia_somente_refuses_on_wrong_delimiter(tmp_path):
+    path = tmp_path / "curado_errado.csv"
+    path.write_text("Ponto,Sample,Type,Curated ID,ASV absolute abundance\nSC1,SC1A,Sample,x,100\n", encoding="utf-8")
+
+    result = run_ecologia_somente(
+        path,
+        runs_dir=tmp_path / "runs",
+        rscript_exe="rscript-fake",
+        eco_runner=_fake_eco_runner_success,
+    )
+
+    assert result.status == "refused"
+    assert "delimitador" in result.validation_summary.lower() or ";" in result.validation_summary
+
+
+def test_ecologia_somente_never_calls_eco_runner_when_columns_missing(tmp_path):
+    curado_csv = _write_curated_csv(tmp_path, columns=["Ponto", "Sample", "Type", "ASV absolute abundance"])
+    calls = []
+
+    def _fake_eco_runner(*args, **kwargs):
+        calls.append(args)
+        return _fake_eco_runner_success(*args, **kwargs)
+
+    result = run_ecologia_somente(
+        curado_csv,
+        runs_dir=tmp_path / "runs",
+        rscript_exe="rscript-fake",
+        eco_runner=_fake_eco_runner,
+    )
+
+    assert result.status == "refused"
+    assert calls == []
+
+
+def test_html_report_generated_when_ecologia_succeeds(tmp_path):
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="mock",
+        ecologia=True,
+        eco_runner=_fake_eco_runner_success,
+    )
+
+    assert result.status == "success"
+    assert result.html_report_path is not None
+    html_file = Path(result.html_report_path)
+    assert html_file.exists()
+    content = html_file.read_text(encoding="utf-8")
+    assert "<html" in content
+    assert "Análise ecológica" in content
+
+
+def test_html_report_not_generated_when_ecologia_not_requested(tmp_path):
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="off",
+    )
+
+    assert result.status == "success"
+    assert result.html_report_path is None
+
+
+def test_html_report_generated_by_ecologia_somente(tmp_path):
+    curado_csv = _write_curated_csv(tmp_path)
+
+    result = run_ecologia_somente(
+        curado_csv,
+        runs_dir=tmp_path / "runs",
+        rscript_exe="rscript-fake",
+        eco_runner=_fake_eco_runner_success,
+    )
+
+    assert result.status == "success"
+    assert result.html_report_path is not None
+    content = Path(result.html_report_path).read_text(encoding="utf-8")
+    assert "Esta análise partiu de um CSV já curado" in content

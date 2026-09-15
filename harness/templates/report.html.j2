@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relatório de execução — desafio_Amplo</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; color: #1a1a1a; background: #f5f6f8; }
+  header { background: #1f2d3d; color: #fff; padding: 1.5rem 2rem; }
+  header h1 { margin: 0 0 .3rem; font-size: 1.4rem; }
+  header .meta { opacity: .85; font-size: .9rem; }
+  main { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.5rem 4rem; }
+  section { background: #fff; border: 1px solid #e2e2e2; border-radius: 6px; padding: 1.25rem 1.5rem; margin-bottom: 1.5rem; }
+  section h2 { margin-top: 0; font-size: 1.15rem; border-bottom: 1px solid #eee; padding-bottom: .5rem; }
+  .warning-banner { background: #fff3cd; border: 1px solid #ffe69c; color: #664d03; padding: 1rem 1.5rem; border-radius: 6px; margin-bottom: 1.5rem; }
+  .stage-block { margin-bottom: 1.25rem; }
+  .stage-block h3 { margin-bottom: .35rem; font-size: 1rem; }
+  .stage-block dl { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 0; font-size: .9rem; }
+  .stage-block dt { font-weight: 600; color: #444; }
+  .stage-block dd { margin: 0; }
+  .empty-note { color: #888; font-style: italic; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; }
+  .summary-grid .stat { background: #f2f4f7; border-radius: 6px; padding: .75rem 1rem; }
+  .summary-grid .stat .value { font-size: 1.4rem; font-weight: 700; }
+  .summary-grid .stat .label { font-size: .8rem; color: #666; }
+  .flags { margin-top: .75rem; font-size: .85rem; color: #555; }
+  .divergence-case { border-left: 3px solid #c9a227; padding-left: .75rem; margin-bottom: .75rem; font-size: .9rem; }
+  iframe.plot-frame { width: 100%; height: 520px; border: 1px solid #e2e2e2; border-radius: 6px; }
+  table.dataTable { width: 100% !important; font-size: .82rem; }
+  .narrative { white-space: pre-wrap; line-height: 1.5; font-size: .92rem; }
+  {{ datatables_css }}
+</style>
+<script>{{ jquery_js }}</script>
+<script>{{ datatables_js }}</script>
+</head>
+<body>
+
+{% macro render_table(table) %}
+{% if table %}
+<table id="{{ table.id }}" class="display" style="width:100%">
+  <thead><tr>{% for col in table.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+  <tbody>
+    {% for row in table.rows %}
+    <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+    {% endfor %}
+  </tbody>
+</table>
+<script>$(function () { $('#{{ table.id }}').DataTable(); });</script>
+{% else %}
+<p class="empty-note">Seção não disponível.</p>
+{% endif %}
+{% endmacro %}
+
+<header>
+  <h1>Relatório de execução — desafio_Amplo</h1>
+  <div class="meta">
+    {% if researcher %}{{ researcher }}{% endif %}
+    {% if project %} &middot; {{ project }}{% endif %}
+    {% if primer %} &middot; primer {{ primer }}{% endif %}
+    {% if started_at %} &middot; {{ started_at }}{% endif %}
+    &middot; {{ "Somente análise ecológica" if is_somente else "Execução completa" }}
+  </div>
+</header>
+
+<main>
+  {% if is_somente %}
+  <div class="warning-banner">
+    Esta análise partiu de um CSV já curado por uma execução anterior, possivelmente revisado à mão, fora de uma execução completa desta vez — as seções de entrada bruta e de resumo da curadoria determinística não se aplicam aqui.
+  </div>
+  {% endif %}
+
+  <section>
+    <h2>Resumo geral</h2>
+    {% if metadata_summary %}
+    <div class="summary-grid">
+      {% if metadata_summary.amostras is not none %}<div class="stat"><div class="value">{{ metadata_summary.amostras }}</div><div class="label">Amostras</div></div>{% endif %}
+      {% if metadata_summary.amostras_reais is not none %}<div class="stat"><div class="value">{{ metadata_summary.amostras_reais }}</div><div class="label">Amostras reais</div></div>{% endif %}
+      {% if metadata_summary.controles is not none %}<div class="stat"><div class="value">{{ metadata_summary.controles }}</div><div class="label">Controles</div></div>{% endif %}
+      {% if metadata_summary.pontos_unicos is not none %}<div class="stat"><div class="value">{{ metadata_summary.pontos_unicos }}</div><div class="label">Pontos únicos</div></div>{% endif %}
+      {% if metadata_summary.data_min and metadata_summary.data_max %}<div class="stat"><div class="value" style="font-size:1rem;">{{ metadata_summary.data_min }} – {{ metadata_summary.data_max }}</div><div class="label">Faixa de datas</div></div>{% endif %}
+    </div>
+    <div class="flags">
+      Latitude/Longitude: {{ "presente" if metadata_summary.tem_latitude else "ausente" }} &middot;
+      Habitat: {{ "presente" if metadata_summary.tem_habitat else "ausente" }} &middot;
+      Rios: {{ "presente" if metadata_summary.tem_rios else "ausente" }}
+    </div>
+    {% else %}
+    <p class="empty-note">Seção não disponível.</p>
+    {% endif %}
+  </section>
+
+  {% if not is_somente %}
+  <section>
+    <h2>Tabela de entrada bruta</h2>
+    {{ render_table(input_table) }}
+  </section>
+
+  <section>
+    <h2>Resumo da curadoria determinística</h2>
+    {% if diagnostics %}
+      {% if diagnostics.refinamento_hits %}
+      <div class="stage-block">
+        <h3>Refinamento dos hits de BLAST</h3>
+        <dl>
+          <dt>Origem do hit selecionado</dt><dd>{{ diagnostics.refinamento_hits.selected_hit_origin }}</dd>
+          <dt>Hits não confiáveis (Match_not_reliable)</dt><dd>{{ diagnostics.refinamento_hits.match_not_reliable_count }} de {{ diagnostics.refinamento_hits.total_linhas }}</dd>
+        </dl>
+      </div>
+      {% endif %}
+      {% if diagnostics.taxonomia_contaminacao %}
+      <div class="stage-block">
+        <h3>Taxonomia NCBI + contaminação</h3>
+        <dl><dt>Status de contaminação</dt><dd>{{ diagnostics.taxonomia_contaminacao.contamination_status }}</dd></dl>
+      </div>
+      {% endif %}
+      {% if diagnostics.curadoria_final %}
+      <div class="stage-block">
+        <h3>Curadoria final</h3>
+        <dl>
+          <dt>Faixa de amplicon</dt><dd>{{ diagnostics.curadoria_final.primer_expected_length }}</dd>
+          <dt>Identificação máxima</dt><dd>{{ diagnostics.curadoria_final.identification_max_taxonomy }}</dd>
+          <dt>Grupos de táxons-alvo</dt><dd>{{ diagnostics.curadoria_final.taxons_alvo_grupos }}</dd>
+          <dt>Possible target taxon</dt><dd>{{ diagnostics.curadoria_final.possible_target_taxon }}</dd>
+        </dl>
+      </div>
+      {% endif %}
+      {% if diagnostics.arvore_filogenetica %}
+      <div class="stage-block">
+        <h3>Árvore filogenética</h3>
+        <dl><dt>Vizinhos calculados</dt><dd>{{ diagnostics.arvore_filogenetica.vizinhos_calculados }} de {{ diagnostics.arvore_filogenetica.total_linhas }} linhas</dd></dl>
+      </div>
+      {% endif %}
+      {% if diagnostics.checagem_regional %}
+      <div class="stage-block">
+        <h3>Checagem regional (GBIF)</h3>
+        <dl>
+          <dt>Linhas consultadas</dt><dd>{{ diagnostics.checagem_regional.gbif_consultadas }}</dd>
+          {% if diagnostics.checagem_regional.pulada %}<dt>Pulada</dt><dd>{{ diagnostics.checagem_regional.motivo }}</dd>{% endif %}
+        </dl>
+      </div>
+      {% endif %}
+    {% else %}
+    <p class="empty-note">Seção não disponível.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>Tabela de saída determinística (antes da curadoria assistida)</h2>
+    {{ render_table(deterministic_table) }}
+  </section>
+
+  <section>
+    <h2>Curadoria assistida por LLM</h2>
+    {% if report_text %}
+      <div class="narrative">{{ report_text }}</div>
+    {% elif llm_reviewed_count is not none %}
+      <p>{{ llm_reviewed_count }} de {{ llm_total_unique_asvs }} ASVs únicas revisadas.</p>
+    {% else %}
+      <p class="empty-note">Seção não disponível.</p>
+    {% endif %}
+    {% if llm_divergence_examples %}
+      <h3 style="margin-top:1rem;">Casos de divergência</h3>
+      {% for ex in llm_divergence_examples %}
+      <div class="divergence-case">
+        <strong>{{ ex['ASV header'] }}</strong>: {{ ex['Identification'] }} → {{ ex['Assisted ID (LLM)'] }}
+        (confiança {{ ex['Assisted Confidence (LLM)'] }})<br>
+        <span style="color:#555;">{{ ex['Assisted Justification (LLM)'] }}</span>
+      </div>
+      {% endfor %}
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <section>
+    <h2>Tabela final</h2>
+    {{ render_table(final_table) }}
+  </section>
+
+  {% if ecologia_plots %}
+  <section>
+    <h2>Análise ecológica</h2>
+    {% for plot in ecologia_plots %}
+    <div class="stage-block">
+      <h3>{{ plot.title }}</h3>
+      {% if plot.kind == "html" %}
+        <iframe class="plot-frame" srcdoc="{{ plot.content }}"></iframe>
+      {% else %}
+        <img src="{{ plot.content }}" style="max-width:100%; border:1px solid #e2e2e2; border-radius:6px;">
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% elif ecologia_requested %}
+  <section>
+    <h2>Análise ecológica</h2>
+    <p class="empty-note">Seção não disponível.</p>
+  </section>
+  {% endif %}
+</main>
+</body>
+</html>

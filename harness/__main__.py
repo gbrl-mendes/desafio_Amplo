@@ -1,11 +1,16 @@
 """Ponto de entrada do harness: `python -m harness <entrada.csv> [opcoes]`.
 
 Ve `orchestrator.run` para o fluxo completo (resumo da entrada -> validar ->
-rodar R -> verificar -> checkpoint -> curadoria assistida -> logar). Este
-modulo so cuida de argumentos de linha de comando e do codigo de saida do
-processo, que reflete o status do run:
-  0 = sucesso, 2 = entrada recusada pela validacao, 3 = falha de execucao
-  (R ausente, erro no script R, verificacao pos-execucao reprovada, etc.).
+rodar R -> verificar -> checkpoint -> curadoria assistida -> analise
+ecologica opcional -> logar). Com `--ecologia-somente CURADO.CSV` no lugar
+de `<entrada.csv>`, ramifica pra `orchestrator.run_ecologia_somente` --
+caminho mais curto que roda so a analise ecologica sobre um CSV ja curado,
+sem refazer a curadoria. Este modulo so cuida de argumentos de linha de
+comando e do codigo de saida do processo, mesmo mapeamento pros dois
+caminhos:
+  0 = sucesso, 2 = entrada recusada (validacao, ou CSV/colunas inesperadas
+  em --ecologia-somente), 3 = falha de execucao (R ausente, erro no script
+  R, verificacao pos-execucao reprovada, etc.).
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from harness.orchestrator import DEFAULT_RUNS_DIR, run
+from harness.orchestrator import DEFAULT_RUNS_DIR, run, run_ecologia_somente
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,7 +27,15 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m harness",
         description="Roda a curadoria deterministica de ASVs (eDNA_Cipo, MiFish2) sobre um CSV de entrada.",
     )
-    parser.add_argument("input_csv", help="Caminho do CSV de entrada (schema em data/reference/asv_input_schema.yaml).")
+    parser.add_argument(
+        "input_csv",
+        nargs="?",
+        default=None,
+        help=(
+            "Caminho do CSV de entrada (schema em data/reference/asv_input_schema.yaml). "
+            "Obrigatorio, a menos que --ecologia-somente seja usado no lugar."
+        ),
+    )
     parser.add_argument(
         "--config",
         dest="config_path",
@@ -81,11 +94,71 @@ def build_parser() -> argparse.ArgumentParser:
             "runs/<timestamp>_ecologia/. Desligada por padrao."
         ),
     )
+    parser.add_argument(
+        "--groq-api-key",
+        dest="groq_api_key",
+        default=None,
+        help=(
+            "Chave da API da Groq para a curadoria assistida e o relatorio narrativo, informada "
+            "diretamente na chamada. Tem prioridade sobre GROQ_API_KEY (variavel de ambiente ou "
+            ".env). Se preferir nao deixar a chave visivel no historico do terminal, prefira a "
+            "variavel de ambiente."
+        ),
+    )
+    parser.add_argument(
+        "--groq-model",
+        dest="groq_model",
+        default=None,
+        help="Modelo da Groq a usar, informado diretamente na chamada. Tem prioridade sobre GROQ_MODEL.",
+    )
+    parser.add_argument(
+        "--ecologia-somente",
+        dest="ecologia_somente_csv",
+        default=None,
+        metavar="CURADO.CSV",
+        help=(
+            "Roda so a analise ecologica sobre um CSV ja curado (opcionalmente editado a mao), "
+            "sem refazer a curadoria. Mutuamente exclusivo com <entrada.csv>."
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.input_csv is None and args.ecologia_somente_csv is None:
+        parser.error("informe <entrada.csv> ou --ecologia-somente CURADO.CSV.")
+    if args.input_csv is not None and args.ecologia_somente_csv is not None:
+        parser.error("<entrada.csv> e --ecologia-somente sao mutuamente exclusivos -- use so um dos dois.")
+
+    if args.ecologia_somente_csv is not None:
+        result = run_ecologia_somente(
+            curado_csv_path=args.ecologia_somente_csv,
+            config_path=args.config_path,
+            reference_path=args.traditional_species_csv,
+            runs_dir=args.runs_dir,
+        )
+
+        print(f"Status: {result.status}")
+        print(result.validation_summary)
+
+        if result.status == "refused":
+            print(f"\nEntrada recusada: {result.error or result.validation_summary}")
+            return 2
+        if result.status == "failed":
+            if result.error:
+                print(f"\nFalha: {result.error}")
+            if result.r_exit_code not in (None, 0):
+                print(f"\nR terminou com codigo {result.r_exit_code}. Ultimas linhas do stderr:")
+                print(result.r_stderr_tail)
+            return 3
+
+        print(f"\nSucesso. Analise ecologica em: {result.ecologia_output_dir}")
+        if result.html_report_path:
+            print(f"Relatorio HTML: {result.html_report_path}")
+        return 0
 
     result = run(
         input_csv=args.input_csv,
@@ -96,6 +169,8 @@ def main(argv: list[str] | None = None) -> int:
         traditional_species_csv=args.traditional_species_csv,
         assume_yes=args.assume_yes,
         ecologia=args.ecologia,
+        groq_api_key=args.groq_api_key,
+        groq_model=args.groq_model,
     )
 
     print(f"Status: {result.status}")
@@ -147,6 +222,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if result.ecologia_output_dir:
         print(f"Analise ecologica: {result.ecologia_output_dir}")
+        if result.html_report_path:
+            print(f"Relatorio HTML: {result.html_report_path}")
     elif result.ecologia_error:
         print(f"Analise ecologica falhou: {result.ecologia_error}")
 
