@@ -138,8 +138,10 @@ Os blocos estão organizados assim:
     taxons_alvo = list(
       # Nomes de grupos definidos no registro interno de taxons-alvo (bloco
       # 4). Um projeto multi-primer pode combinar mais de um grupo, ex.
-      # c("Metazoa", "Periphyton").
-      grupos = c("Metazoa")
+      # c("Actinopteri", "Periphyton"). "Actinopteri" (peixes osseos), nao o
+      # "Metazoa" generico (reino animal inteiro) -- default calibrado pro
+      # dataset de demonstracao deste projeto (eDNA_Cipo, peixes).
+      grupos = c("Actinopteri")
     ),
     checagem_regional = list(
       fonte = "gbif",
@@ -827,7 +829,12 @@ A validação completa (colunas obrigatórias, vazamento, chave primária) é re
       dplyr::mutate(
         Identification = dplyr::case_when(
           `BLASTn pseudo-score` >= thresholds$especie ~ `BLAST ID`,
-          `BLASTn pseudo-score` >= thresholds$genero ~ `Genus (NCBI)`,
+          # "Genero sp." (nomenclatura binomial), nao so o genero sozinho --
+          # mantem o padrao com o resto do sistema, que sempre trabalha com
+          # a convencao binomial mesmo quando a identificacao nao chega a
+          # nivel de especie.
+          `BLASTn pseudo-score` >= thresholds$genero & !is.na(`Genus (NCBI)`) ~ paste0(`Genus (NCBI)`, " sp."),
+          `BLASTn pseudo-score` >= thresholds$genero ~ NA_character_,
           `BLASTn pseudo-score` >= thresholds$familia ~ `Family (NCBI)`,
           `BLASTn pseudo-score` >= thresholds$ordem ~ `Order (NCBI)`,
           `BLASTn pseudo-score` >= thresholds$classe ~ `Class (NCBI)`,
@@ -856,6 +863,19 @@ A validação completa (colunas obrigatórias, vazamento, chave primária) é re
       kingdom = "Metazoa",
       phyla = character(0),
       classes = character(0)
+    ),
+    # Restrito a peixes ossseos (classe Actinopteri), nao ao reino animal
+    # inteiro -- "Metazoa" sozinho deixa passar qualquer animal (ex.
+    # contaminacao de Bos taurus, comum em reagente de laboratorio) como
+    # "Possible target taxon = TRUE" num projeto de eDNA de peixes, gastando
+    # cota de LLM revisando identificacao de organismo fora do escopo real.
+    # Mesma classe usada no filtro do notebook de referencia original
+    # (scripts/ecology/reference/eDNA_cipo_script.qmd: Class (NCBI) ==
+    # "Actinopteri").
+    Actinopteri = list(
+      kingdom = NA_character_,
+      phyla = character(0),
+      classes = c("Actinopteri")
     ),
     Benthos = list(
       kingdom = NA_character_,

@@ -87,7 +87,7 @@ não eram informativos, ex. "Uncultured organism"): {hit_origin}
 - Vizinhos filogenéticos mais próximos na árvore ASV-contra-ASV (k=5, cada um com seu próprio \
 identificador de ASV -- consulte a identificação de cada vizinho na mesma tabela se precisar): \
 {neighbors}
-- Registros dessa espécie no GBIF dentro da bacia do rio São Francisco / Serra do Cipó: \
+- Registros dessa espécie no GBIF dentro da área geográfica configurada para a checagem regional: \
 {gbif_count} (NA = não consultado, pois a identificação não chegou a nível de espécie)
 - Detectada em {n_samples} amostra(s) reais; marcada como possível contaminação (Fold Change \
 baixo vs. controle) em {n_contam} dessas
@@ -102,7 +102,10 @@ ausência).
 TAREFA: Responda em português, em JSON estrito, sem nenhum texto fora do JSON, com exatamente estas chaves:
 {{
   "assisted_id": "nome científico ou nível taxonômico mais específico que você considera \
-defensável dado o conjunto de evidências, ou 'Unidentified' se não houver evidência suficiente",
+defensável dado o conjunto de evidências, ou 'Unidentified' se não houver evidência suficiente. \
+Se a identificação mais defensável ficar só a nível de gênero (não confirmar a espécie), \
+responda no formato binomial 'Genero sp.' (ex. 'Astyanax sp.'), nunca só o nome do gênero \
+sozinho -- mesma convenção usada pela curadoria determinística",
   "assisted_confidence": "Alta, Média ou Baixa",
   "assisted_justification": "1 a 3 frases explicando o raciocínio, citando as evidências acima \
 que pesaram na decisão"

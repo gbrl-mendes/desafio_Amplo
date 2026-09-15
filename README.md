@@ -163,7 +163,7 @@ arvore_filogenetica:
   k_vizinhos: 5
 
 taxons_alvo:
-  grupos: ["Metazoa"]
+  grupos: ["Actinopteri"]
 
 checagem_regional:
   fonte: gbif
@@ -202,7 +202,7 @@ Isso renomeia a coluna para `Researcher` antes de qualquer outra etapa rodar, in
 
 **`arvore_filogenetica.k_vizinhos`.** Quantos vizinhos filogenéticos mais próximos (distância na árvore Neighbor-Joining entre as sequências únicas) entram na coluna `Vizinhos filogenéticos (k)`, evidência usada pela curadoria assistida. Default `5`.
 
-**`taxons_alvo.grupos`.** Lista de grupos ecológicos considerados dentro do escopo para `Possible target taxon`, comparando reino/filo/classe de cada sequência contra os grupos listados. Grupos disponíveis: `Metazoa`, `Plantae`, `Benthos`, `Zooplankton`, `Periphyton`, `Phytoplankton`; default `["Metazoa"]`.
+**`taxons_alvo.grupos`.** Lista de grupos ecológicos considerados dentro do escopo para `Possible target taxon`, comparando reino/filo/classe de cada sequência contra os grupos listados. Grupos disponíveis: `Actinopteri` (peixes ósseos), `Metazoa` (reino animal inteiro, mais amplo), `Plantae`, `Benthos`, `Zooplankton`, `Periphyton`, `Phytoplankton`; default `["Actinopteri"]`, calibrado pro dataset de demonstração deste projeto (peixes).
 
 **`checagem_regional`.**
 
