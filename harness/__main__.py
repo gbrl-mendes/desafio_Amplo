@@ -55,9 +55,10 @@ def build_parser() -> argparse.ArgumentParser:
         dest="traditional_species_csv",
         default=None,
         help=(
-            "CSV opcional (;-delimitado, UTF-8) com especies obtidas por metodos tradicionais "
-            "de monitoramento (colunas Ponto e Taxon_binomial) -- usado como evidencia extra na "
-            "curadoria assistida por LLM. Ver data/example/spp_tradicional.csv."
+            "CSV opcional (;-delimitado, UTF-8, pelo menos 2 colunas: ponto na primeira, "
+            "taxon na ultima ou numa coluna chamada Taxon_binomial) com especies obtidas por "
+            "metodos tradicionais de monitoramento -- usado como evidencia extra na curadoria "
+            "assistida por LLM. Ver data/example/exemplo_1/spp_tradicional.csv."
         ),
     )
     parser.add_argument(

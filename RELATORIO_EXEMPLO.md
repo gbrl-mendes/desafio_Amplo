@@ -1,12 +1,12 @@
-# Relatório de exemplo — execução real sobre o dado de demonstração
+# Relatório de exemplo: execução real sobre o dado de demonstração
 
 ```bash
-python -m harness data/example/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv \
-  --output data/example/saida_exemplo_curada.csv \
-  --reference data/example/spp_tradicional.csv --llm-mode=live
+python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv \
+  --output data/example/exemplo_1/saida_exemplo_curada.csv \
+  --reference data/example/exemplo_1/spp_tradicional.csv --llm-mode=live
 ```
 
-CSV completo em [`data/example/saida_exemplo_curada.csv`](data/example/saida_exemplo_curada.csv). O texto
+CSV completo em [`data/example/exemplo_1/saida_exemplo_curada.csv`](data/example/exemplo_1/saida_exemplo_curada.csv). O texto
 abaixo é o relatório gerado por essa execução (`harness/report_generation.py`), sem edição manual.
 
 ---
@@ -14,7 +14,7 @@ abaixo é o relatório gerado por essa execução (`harness/report_generation.py
 # Relatório Técnico de Curadoria de Dados eDNA (Metabarcoding) – Peixes
 
 ## 1. Contexto da Execução
-- **Arquivo de entrada:** `data/example/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv`
+- **Arquivo de entrada:** `data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv`
 - **Número de linhas de entrada:** 80
 - **Janela de execução:** 2026-09-13 21:12:34 UTC → 2026-09-13 21:15:47 UTC
 

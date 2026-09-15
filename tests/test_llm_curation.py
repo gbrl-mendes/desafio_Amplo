@@ -15,6 +15,7 @@ from harness.llm_curation import (
     build_asv_evidence,
     build_traditional_evidence_text,
     extract_groq_error_message,
+    load_traditional_species,
     needs_review,
     run_llm_assisted_curation,
 )
@@ -59,6 +60,7 @@ def _base_row(**overrides) -> dict:
         "Habitat": "Cânion",
         "Rios": "Mascate",
         "ASV header": ">ASV_1-168bp",
+        "Primer": "MiFish2",
         "BLAST ID": "Astyanax lacustris",
         "Identification": "Astyanax lacustris",
         "Identification Max. taxonomy": "Species",
@@ -73,7 +75,6 @@ def _base_row(**overrides) -> dict:
         "Contamination status": "True detection",
         "Primer expected length": "in range",
         "Possible target taxon": True,
-        "Read origin": "merged",
     }
     row.update(overrides)
     return row
@@ -127,9 +128,12 @@ def test_needs_review_false_when_any_sample_flagged_possible_contamination():
     assert needs_review(row) is False
 
 
-def test_needs_review_false_when_read_origin_not_merged():
-    row = pd.Series(_base_row(**{"Read origin": "R1", "Identification Max. taxonomy": "Genus"}))
-    assert needs_review(row) is False
+def test_needs_review_ignores_read_origin():
+    # Read origin nao existe em todo projeto (ex. exemplo_2, so plantas via
+    # ITS2) -- o filtro de qualidade nao deve depender dela, mesmo quando a
+    # coluna vem presente com um valor que nao seria "merged".
+    row = pd.Series(_base_row(**{"Identification Max. taxonomy": "Genus", "Read origin": "R1"}))
+    assert needs_review(row) is True
 
 
 def test_build_asv_evidence_excludes_controls_and_aggregates():
@@ -147,6 +151,33 @@ def test_build_asv_evidence_excludes_controls_and_aggregates():
     assert row["n_amostras_detectada"] == 2
     assert row["n_amostras_possivel_contaminacao"] == 1
     assert row["pontos"] == ["SC1"]  # controle (Ponto=SCctrl) nao entra
+
+
+def test_build_asv_evidence_type_is_case_insensitive():
+    rows = [
+        _base_row(Sample="SC1A", **{"Type": "sample"}),
+        _base_row(Sample="SC1B", **{"Type": "Sample"}),
+        _base_row(Sample="SC1C", **{"Type": "SAMPLE"}),
+    ]
+    df = _make_df(rows)
+
+    evidence = build_asv_evidence(df)
+
+    assert len(evidence) == 1
+    assert evidence.iloc[0]["n_amostras_detectada"] == 3
+
+
+def test_build_asv_evidence_habitat_rios_optional_when_absent():
+    # exemplo_2 nao tem os slots de metadado que viram Habitat/Rios -- a
+    # agregacao nao pode quebrar so porque essas colunas nao existem.
+    rows = [{k: v for k, v in _base_row().items() if k not in ("Habitat", "Rios")}]
+    df = _make_df(rows)
+
+    evidence = build_asv_evidence(df)
+
+    assert len(evidence) == 1
+    assert evidence.iloc[0]["habitats"] == []
+    assert evidence.iloc[0]["rios"] == []
 
 
 def test_run_llm_assisted_curation_off_mode_fills_na():
@@ -289,3 +320,52 @@ def test_run_llm_assisted_curation_passes_traditional_evidence_into_prompt():
     )
 
     assert "SC1: Astyanax lacustris" in captured_prompt["prompt"]
+
+
+def test_load_traditional_species_ignores_column_names(tmp_path):
+    # O nome literal das colunas e desprezivel -- so a posicao importa
+    # (primeira = ponto, segunda = taxon), pra aceitar arquivos de outros
+    # projetos sem exigir nome de coluna especifico.
+    path = tmp_path / "referencia.csv"
+    path.write_text("Local;Taxa\nSC1;Astyanax lacustris\nSC2;Brycon nattereri\n", encoding="utf-8")
+
+    df = load_traditional_species(path)
+
+    assert list(df.columns) == ["Ponto", "Taxon_binomial"]
+    assert df.iloc[0]["Ponto"] == "SC1"
+    assert df.iloc[0]["Taxon_binomial"] == "Astyanax lacustris"
+
+
+def test_load_traditional_species_rejects_single_column(tmp_path):
+    path = tmp_path / "referencia.csv"
+    path.write_text("Ponto\nSC1\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="pelo menos 2 colunas"):
+        load_traditional_species(path)
+
+
+def test_load_traditional_species_uses_taxon_binomial_column_by_name_when_present(tmp_path):
+    # Tabela real do exemplo_1 tem 5 colunas (Ponto, Taxon, Genero, Epiteto,
+    # Taxon_binomial) -- as do meio sao a decomposicao do nome cientifico,
+    # devem ser ignoradas em favor da coluna ja pronta chamada Taxon_binomial.
+    path = tmp_path / "referencia.csv"
+    path.write_text(
+        "Ponto;Taxon;Genero;Epiteto;Taxon_binomial\n"
+        "SC1;Astyanax lacustris;Astyanax;lacustris;Astyanax lacustris\n",
+        encoding="utf-8",
+    )
+
+    df = load_traditional_species(path)
+
+    assert list(df.columns) == ["Ponto", "Taxon_binomial"]
+    assert df.iloc[0]["Taxon_binomial"] == "Astyanax lacustris"
+
+
+def test_load_traditional_species_falls_back_to_last_column_without_taxon_binomial_name(tmp_path):
+    path = tmp_path / "referencia.csv"
+    path.write_text("Ponto;Taxon;Extra\nSC1;Astyanax lacustris;x\n", encoding="utf-8")
+
+    df = load_traditional_species(path)
+
+    assert list(df.columns) == ["Ponto", "Taxon_binomial"]
+    assert df.iloc[0]["Taxon_binomial"] == "x"

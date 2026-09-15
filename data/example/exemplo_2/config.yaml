@@ -1,0 +1,14 @@
+# Config do exemplo_2: dataset de raízes (roots_metabar), primer ITS2,
+# plantas -- domínio completamente diferente do exemplo_1 (peixes, MiFish2),
+# de propósito, pra demonstrar a flexibilidade do pipeline.
+#
+# Não declara Latitude/Longitude nem amplicon_por_primer pro ITS2: a
+# checagem regional é pulada com aviso (dataset sem coordenadas), e a faixa
+# de amplicon do ITS2 é detectada automaticamente a partir da própria
+# distribuição de tamanho das sequências (ver resolve_amplicon_ranges no
+# curadoria_deterministica.qmd).
+colunas_alias:
+  PCR control: PCR Control
+
+taxons_alvo:
+  grupos: ["Plantae"]

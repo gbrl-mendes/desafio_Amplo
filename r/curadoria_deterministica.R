@@ -70,6 +70,11 @@ DEFAULT_CONFIG <- list(
   contaminacao = list(
     fold_change_threshold = 10
   ),
+  # Faixa de tamanho esperada (pb) por primer. So precisa declarar aqui o
+  # primer que voce quer travar manualmente -- qualquer primer presente
+  # nos dados e NAO declarado aqui tem a faixa calculada automaticamente
+  # a partir da propria distribuicao de ASV Size (pb) daquele primer no
+  # dataset (ver resolve_amplicon_ranges, bloco 4).
   amplicon_por_primer = list(
     MiFish2 = c(140, 200)
   ),
@@ -105,7 +110,16 @@ load_config <- function(config_path = NULL, defaults = DEFAULT_CONFIG) {
     stop(sprintf("Arquivo de config '%s' nao encontrado.", config_path), call. = FALSE)
   }
   user_config <- yaml::read_yaml(config_path)
-  utils::modifyList(defaults, user_config, keep.null = TRUE)
+  merged <- utils::modifyList(defaults, user_config, keep.null = TRUE)
+
+  if (!is.null(user_config$colunas_alias)) {
+    merged_alias <- utils::modifyList(
+      as.list(defaults$colunas_alias), as.list(user_config$colunas_alias), keep.null = TRUE
+    )
+    merged$colunas_alias <- unlist(merged_alias)
+  }
+
+  merged
 }
 
 read_schema <- function(schema_path = SCHEMA_PATH) {
@@ -524,6 +538,34 @@ run_taxonomy_and_contamination <- function(df, config = DEFAULT_CONFIG, entrez_k
   flag_contamination(df, fold_change_threshold = config$contaminacao$fold_change_threshold)
 }
 
+resolve_amplicon_ranges <- function(df, amplicon_por_primer) {
+  resolved <- amplicon_por_primer
+  for (primer in unique(df$Primer)) {
+    if (!is.null(resolved[[primer]])) next
+
+    sizes <- df$`ASV Size (pb)`[df$Primer == primer]
+    sizes <- sizes[!is.na(sizes)]
+    if (length(sizes) < 4) {
+      warning(sprintf(
+        "Primer '%s' sem faixa declarada em amplicon_por_primer e com poucos dados (%d ASVs) pra estimar automaticamente -- Primer expected length fica indefinido para ele.",
+        primer, length(sizes)
+      ), call. = FALSE)
+      next
+    }
+
+    q <- stats::quantile(sizes, probs = c(0.25, 0.75), names = FALSE)
+    iqr <- q[2] - q[1]
+    lower <- max(0, q[1] - 1.5 * iqr)
+    upper <- q[2] + 1.5 * iqr
+    resolved[[primer]] <- c(lower, upper)
+    message(sprintf(
+      "Faixa de amplicon do primer '%s' detectada automaticamente: %.0f-%.0f pb (%d ASVs, IQR).",
+      primer, lower, upper, length(sizes)
+    ))
+  }
+  resolved
+}
+
 flag_amplicon_length <- function(df, amplicon_por_primer) {
   range_lookup <- function(primer) amplicon_por_primer[[primer]]
 
@@ -628,6 +670,14 @@ TARGET_TAXA_REGISTRY <- list(
       "Pelagophyceae", "Phaeophyceae", "Phaeothamniophyceae",
       "Raphidophyceae", "Synurophyceae", "Xanthophyceae"
     )
+  ),
+  # Reino real reportado pelo NCBI pra plantas terrestres e algas verdes e
+  # "Viridiplantae", nao "Plantae" -- conferido contra taxid reais de um
+  # projeto de eDNA de raizes (marcador ITS2) antes de registrar aqui.
+  Plantae = list(
+    kingdom = "Viridiplantae",
+    phyla = character(0),
+    classes = character(0)
   )
 )
 
@@ -824,7 +874,7 @@ run_regional_check <- function(df, config = DEFAULT_CONFIG) {
 ORIGINAL_LONG_COLUMN_ORDER <- c(
   "Researcher", "Project", "BLASTn pseudo-score", "Identification",
   "Identification Max. taxonomy", "Primer", "Sample", "Unique_File_name",
-  "Read origin", "Total clean sample abd.", "Clean relative abd. on sample",
+  "Total clean sample abd.", "Clean relative abd. on sample",
   "Relative abundance to all samples", "Relative abundance on sample",
   "Sample total abundance", "ASV absolute abundance", "Metadata 1",
   "Metadata 2", "Metadata 3", "Metadata 4", "Metadata 5", "Metadata 6",
@@ -922,6 +972,7 @@ main <- function(args) {
   config <- load_config(parsed$config)
 
   df <- run_setup_parsing(parsed$input, config = config)
+  config$amplicon_por_primer <- resolve_amplicon_ranges(df, config$amplicon_por_primer)
   df <- run_blast_refinement(df)
   df <- run_taxonomy_and_contamination(df, config = config)
   df <- run_final_curation(df, config = config)

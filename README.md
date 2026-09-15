@@ -57,16 +57,16 @@ python -m harness <entrada.csv> [--config config.yaml] [--output output_pos_cura
   - `live` (padrão): chama a Groq nas duas etapas, preenchendo as colunas `Assisted ID/Confidence/Justification (LLM)` e gravando o relatório em `runs/<timestamp>_relatorio.md`. Sem `GROQ_API_KEY` configurada, as duas etapas são puladas e a execução segue normalmente.
   - `mock`: não chama a Groq, preenche as mesmas colunas e o mesmo relatório com uma resposta simulada, para testar o encadeamento sem gastar cota de API.
   - `off`: pula as duas etapas por completo. Sai só o CSV do pipeline em R e o log JSON, sem colunas assistidas e sem relatório narrativo.
-- `--reference`: CSV opcional (`;`-delimitado, UTF-8, colunas `Ponto` e `Taxon_binomial`) com espécies já registradas por métodos tradicionais nos mesmos pontos amostrais, usado como evidência adicional na curadoria assistida (ver [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md)). Exemplo em [`data/example/spp_tradicional.csv`](data/example/spp_tradicional.csv).
+- `--reference`: CSV opcional (`;`-delimitado, UTF-8, pelo menos 2 colunas: ponto amostral na primeira, taxon na última ou numa coluna chamada `Taxon_binomial`; colunas extras no meio, e o nome literal de cada coluna, são irrelevantes) com espécies já registradas por métodos tradicionais nos mesmos pontos amostrais, usado como evidência adicional na curadoria assistida (ver [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md)). Exemplo em [`data/example/exemplo_1/spp_tradicional.csv`](data/example/exemplo_1/spp_tradicional.csv).
 
 Código de saída do processo: `0` sucesso, `2` entrada recusada pela validação, `3` falha na execução.
 
 ### Exemplos
 
-- **Uso simples**
+- **Primeiro exemplo: Dataset de Sequências de eDNA de Peixes**
 
 ```bash
-python -m harness data/example/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv
+python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv
 ```
 
 O dado de demonstração é um subset randomizado de 50 sequências (80 linhas, sequência × amostra) do projeto eDNA_Cipo, reduzido para manter o consumo de cota de API e o tempo de execução baixos. Sem `--output`, grava `runs/output_pos_curadoria_LLM-<AAAA-MM-DD>.csv`, um log em `runs/<timestamp>.json` e um relatório narrativo em `runs/<timestamp>_relatorio.md`.
@@ -74,10 +74,18 @@ O dado de demonstração é um subset randomizado de 50 sequências (80 linhas, 
 - **Uso com referência de amostragens tradicionais**
 
 ```bash
-python -m harness data/example/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/spp_tradicional.csv
+python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv
 ```
 
 Mesma execução, mas a curadoria assistida também considera, por ponto de coleta, as espécies já registradas por métodos tradicionais na tabela de `--reference`.
+
+- **Segundo exemplo: Dataset de Metabarcoding de Raízes**
+
+```bash
+python -m harness data/example/exemplo_2/dasafio_Amplo-roots_metabar_subset_output-2026-09-15.csv --reference data/example/exemplo_2/roots_metabar_spp_tradicional.csv --config data/example/exemplo_2/config.yaml
+```
+
+Segundo dado de demonstração, do projeto roots_metabar (raízes, primer ITS2, plantas), de domínio taxonômico e origem diferentes do primeiro. Não tem dados de Latitude/Longitude, então a checagem regional por GBIF é pulada.  O `--config` aponta o grupo taxonômico alvo para `Plantae` e mapeia o nome de coluna de controle próprio deste dataset (`PCR control`) para o nome interno esperado.
 
 ## Configuração:`--config`
 
@@ -131,7 +139,7 @@ colunas_alias:
 Isso renomeia a coluna para `Researcher` antes de qualquer outra etapa rodar, inclusive antes da checagem de coluna obrigatória. Dali em diante, o resto do sistema nunca sabe que o nome original era diferente.
 
 - Só é preciso declarar as colunas cujo nome já não bater com o canônico; o resto é assumido como já estando no nome certo.
-- Cobre qualquer coluna do contrato: `Researcher`, `Project`, `Primer`, `Sample`, `Unique_File_name`, `Read origin`, `ASV absolute abundance`, os campos de cada um dos 3 hits de BLAST (`1_subject header`, `1_staxid`, `1_subject`, `1_indentity`, `1_qcovhsp`, e o mesmo
+- Cobre qualquer coluna do contrato: `Researcher`, `Project`, `Primer`, `Sample`, `Unique_File_name`, `ASV absolute abundance`, os campos de cada um dos 3 hits de BLAST (`1_subject header`, `1_staxid`, `1_subject`, `1_indentity`, `1_qcovhsp`, e o mesmo
   para `2_`/`3_`).
 - `Ponto` é a única coluna semântica obrigatória. `Latitude`/`Longitude` são opcionais; sem elas, as etapas que dependem de cada uma são puladas com aviso. `Latitude`/`Longitude` esperam grau decimal codificado como inteiro (ex. `-19420314` para `-19.420314`) e são convertidas automaticamente; não há suporte a grau decimal já pronto.
 
@@ -166,5 +174,3 @@ pytest tests/ -v
 ## Contato
 
 Para mais informações, entre em contato comigo através do meu endereço de [e-mail](mailto:gabrielmendesbrt@outlook.com) 😊
-
-

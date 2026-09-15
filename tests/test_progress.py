@@ -44,7 +44,6 @@ def _base_row(**overrides) -> dict:
         "Vizinhos filogeneticos (k)": ">ASV_2-168bp",
         "GBIF regional occurrence count": 42,
         "Possible target taxon": True,
-        "Read origin": "merged",
         "Contamination status": "True detection",
         "Primer expected length": "in range",
     }

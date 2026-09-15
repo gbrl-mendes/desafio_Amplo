@@ -41,7 +41,6 @@ columns:
   - {name: "Primer", role: input, required: true}
   - {name: "Sample", role: input, required: true}
   - {name: "Unique_File_name", role: input, required: true}
-  - {name: "Read origin", role: input, required: true}
   - {name: "obs", role: input, required: false}
   - {name: "Type", role: input, required: true}
 
@@ -60,6 +59,14 @@ columns:
   - {name: "Ponto", role: input, required: true}
 
   # --- Metadados de amostra (Metadata 1-12: automaticamente extraídos do nome da amostra) ---
+  # Todos opcionais individualmente. Por padrão (colunas_alias), Metadata 8/9
+  # viram Latitude/Longitude (checagem regional GBIF) e Metadata 10/11 viram
+  # Habitat/Rios -- guardados como metadado bruto hoje, sem cálculo próprio
+  # ainda, pra alimentar uma futura etapa de análise ecológica (fora do
+  # escopo desta entrega, ver DOMINIO_E_CONTRATO.md). A ausência de qualquer
+  # um desses (inclusive Latitude/Longitude) degrada graciosamente: a
+  # checagem regional é pulada com aviso, Habitat/Rios ficam vazios na
+  # evidência da curadoria assistida, nada quebra.
   - {name: "Metadata 1", role: input, required: false}
   - {name: "Metadata 2", role: input, required: false}
   - {name: "Metadata 3", role: input, required: false}

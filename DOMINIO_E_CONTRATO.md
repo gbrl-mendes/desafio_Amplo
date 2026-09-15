@@ -34,7 +34,7 @@ Monitoramento de biodiversidade de peixes via metabarcoding de eDNA. Dados de de
 
 O sistema é parametrizado (`--config`), não fixo para este dataset. Outro marcador genético, outro projeto de eDNA de peixes, ou outro grupo ecológico (o registro de grupos-alvo em `TARGET_TAXA_REGISTRY` já cobre bentos, zooplâncton, fitoplâncton e perifíton, além de peixes) pode reaproveitar a mesma arquitetura ajustando o arquivo de configuração.
 
-**Segundo input, opcional:** tabela de espécies obtidas por métodos tradicionais de monitoramento (captura física, não eDNA) nos mesmos pontos amostrais, usada só como evidência adicional na camada assistida por LLM (decisão 4 acima); nunca entra na curadoria determinística. CSV `;`-delimitado, UTF-8, uma linha por combinação espécie×ponto, colunas `Ponto` e `Taxon_binomial`; exemplo em [`data/example/spp_tradicional.csv`](data/example/spp_tradicional.csv). Repassado via `--reference` (ver "Ponto de entrada e execução"). Sem essa tabela, a curadoria assistida roda normalmente, só sem essa evidência extra.
+**Segundo input, opcional:** tabela de espécies obtidas por métodos tradicionais de monitoramento (captura física, não eDNA) nos mesmos pontos amostrais, usada só como evidência adicional na camada assistida por LLM (decisão 4 acima); nunca entra na curadoria determinística. CSV `;`-delimitado, UTF-8, uma linha por combinação espécie×ponto, pelo menos 2 colunas (ponto amostral na primeira; taxon na última, ou numa coluna chamada `Taxon_binomial` se houver colunas extras no meio); exemplo em [`data/example/exemplo_1/spp_tradicional.csv`](data/example/exemplo_1/spp_tradicional.csv). Repassado via `--reference` (ver "Ponto de entrada e execução"). Sem essa tabela, a curadoria assistida roda normalmente, só sem essa evidência extra.
 
 ## Saídas previstas
 
@@ -71,5 +71,7 @@ Um CSV final (mesmo formato de entrada), com as colunas reordenadas para compati
 Ver [README](README.md) para instalação, dependências e exemplo de execução. Em resumo:
 
 ```bash
-python -m harness data/example/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/spp_tradicional.csv
+python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv
 ```
+
+Um segundo exemplo, de outro domínio (raízes, primer ITS2, plantas, sem Latitude/Longitude), está em [`data/example/exemplo_2/`](data/example/exemplo_2/), com o `--config` correspondente já pronto (ver README para o comando completo).

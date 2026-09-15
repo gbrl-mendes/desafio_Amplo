@@ -62,18 +62,17 @@ EVIDENCE_COLUMNS = [
     "Class (NCBI)",
     "Vizinhos filogeneticos (k)",
     "GBIF regional occurrence count",
+    "Primer",
     # Usadas so pelo filtro de qualidade em needs_review(), nao entram no
     # prompt -- invariantes por ASV (dependem so de ASV Size/taxonomia, nao
     # da amostra especifica), entao agregar por "first" e seguro.
     "Primer expected length",
     "Possible target taxon",
-    "Read origin",
 ]
 
 PROMPT_TEMPLATE = """Você é um especialista em curadoria taxonômica de dados de eDNA \
-(metabarcoding) de peixes da Serra do Cipó (bacia do rio São Francisco, Minas Gerais, \
-Brasil), primer MiFish2. Você está revisando uma ASV cuja identificação determinística \
-ficou incerta ou levantou alguma suspeita geográfica/de contaminação. Analise as \
+(metabarcoding), primer {primer}. Você está revisando uma ASV cuja identificação \
+determinística ficou incerta ou levantou alguma suspeita geográfica/de contaminação. Analise as \
 evidências abaixo -- já calculadas por um pipeline determinístico (BLAST, taxonomia NCBI, \
 árvore filogenética, GBIF) -- e decida uma identificação final defensável, um nível de \
 confiança e uma justificativa curta. Não invente evidência que não esteja listada abaixo.
@@ -153,18 +152,16 @@ def needs_review(row: pd.Series) -> bool:
 
     So considera ASVs que ja passaram nos filtros de qualidade da curadoria
     deterministica -- amplicon no tamanho esperado, taxon dentro do escopo
-    declarado, sem sinal de contaminacao em nenhuma amostra, leitura merged.
-    Uma ASV que falha em qualquer um desses e descartada por um motivo que
-    nao tem nada a ver com identificacao taxonomica, entao pedir uma segunda
-    opiniao de identificacao pra ela nao agrega nada -- so gasta cota de API.
+    declarado, sem sinal de contaminacao em nenhuma amostra. Uma ASV que
+    falha em qualquer um desses e descartada por um motivo que nao tem nada
+    a ver com identificacao taxonomica, entao pedir uma segunda opiniao de
+    identificacao pra ela nao agrega nada -- so gasta cota de API.
     """
     if row.get("Primer expected length") != "in range":
         return False
     if not bool(row.get("Possible target taxon", False)):
         return False
     if row.get("n_amostras_possivel_contaminacao", 0) > 0:
-        return False
-    if str(row.get("Read origin", "")).strip().lower() != "merged":
         return False
 
     if row.get("BLAST ID") == "Match_not_reliable":
@@ -180,35 +177,51 @@ def needs_review(row: pd.Series) -> bool:
 def build_asv_evidence(df: pd.DataFrame) -> pd.DataFrame:
     """Agrega o dataframe (long-format, uma linha por ASV x amostra) numa
     linha por ASV unica, com a evidencia relevante pra curadoria assistida.
-    So considera amostras reais (Type == "Sample"), nao os proprios
-    controles."""
-    sample_rows = df[df["Type"] == "Sample"].copy()
+    So considera amostras reais (Type == "Sample", sem diferenciar
+    maiusculas/minusculas -- projetos diferentes nao padronizam isso),
+    nao os proprios controles.
 
-    agg_spec = {col: (col, "first") for col in EVIDENCE_COLUMNS}
+    `Habitat`/`Rios` sao opcionais (existem so quando o CSV de entrada tem
+    os slots de metadado correspondentes) -- entram como lista vazia quando
+    ausentes, em vez de quebrar a agregacao."""
+    sample_rows = df[df["Type"].astype(str).str.strip().str.casefold() == "sample"].copy()
+
+    agg_spec = {col: (col, "first") for col in EVIDENCE_COLUMNS if col in sample_rows.columns}
     agg_spec["n_amostras_detectada"] = ("Sample", "nunique")
     agg_spec["n_amostras_possivel_contaminacao"] = (
         "Contamination status",
         lambda s: int((s == "Possible contamination").sum()),
     )
     agg_spec["pontos"] = ("Ponto", lambda s: sorted(s.dropna().astype(str).unique().tolist()))
-    agg_spec["habitats"] = ("Habitat", lambda s: sorted(s.dropna().astype(str).unique().tolist()))
-    agg_spec["rios"] = ("Rios", lambda s: sorted(s.dropna().astype(str).unique().tolist()))
+    for optional_col, key in (("Habitat", "habitats"), ("Rios", "rios")):
+        if optional_col in sample_rows.columns:
+            agg_spec[key] = (optional_col, lambda s: sorted(s.dropna().astype(str).unique().tolist()))
 
     grouped = sample_rows.groupby("ASV header", dropna=False).agg(**agg_spec).reset_index()
+    for key in ("habitats", "rios"):
+        if key not in grouped.columns:
+            grouped[key] = [[] for _ in range(len(grouped))]
     return grouped
 
 
 def load_traditional_species(path: str | Path) -> pd.DataFrame:
     """Le a tabela opcional de especies obtidas por metodos tradicionais de
     monitoramento (captura fisica), no mesmo padrao de CSV do projeto
-    (`;`-delimitado, UTF-8). Exige `Ponto` e `Taxon_binomial` -- as duas
-    colunas usadas para cruzar com a evidencia de cada ASV."""
+    (`;`-delimitado, UTF-8). Exige pelo menos 2 colunas -- a primeira e
+    sempre o ponto amostral -- mas o NOME de cada coluna e desprezivel:
+    usa a coluna chamada `Taxon_binomial`, se existir, senao a ultima
+    coluna, como o taxon. Colunas extras no meio (ex. genero/epiteto
+    decompostos) sao ignoradas, entao um arquivo com mais detalhe que o
+    minimo continua funcionando sem precisar bater nome literal nem
+    contagem exata de coluna."""
     df = pd.read_csv(path, sep=";", encoding="utf-8")
-    required = {"Ponto", "Taxon_binomial"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"Tabela de especies tradicionais sem coluna(s) obrigatoria(s): {sorted(missing)}")
-    return df
+    if len(df.columns) < 2:
+        raise ValueError(
+            "Tabela de especies tradicionais precisa ter pelo menos 2 colunas "
+            f"(ponto, taxon); encontrado {len(df.columns)}: {list(df.columns)}."
+        )
+    taxon_col = "Taxon_binomial" if "Taxon_binomial" in df.columns else df.columns[-1]
+    return df.rename(columns={df.columns[0]: "Ponto", taxon_col: "Taxon_binomial"})[["Ponto", "Taxon_binomial"]]
 
 
 def build_traditional_evidence_text(pontos: list[str], traditional_df: Optional[pd.DataFrame]) -> str:
@@ -234,6 +247,7 @@ def build_traditional_evidence_text(pontos: list[str], traditional_df: Optional[
 
 def build_prompt(evidence_row: pd.Series, traditional_df: Optional[pd.DataFrame] = None) -> str:
     return PROMPT_TEMPLATE.format(
+        primer=evidence_row.get("Primer", "desconhecido"),
         blast_id=evidence_row["BLAST ID"],
         identification=evidence_row["Identification"],
         max_taxonomy=evidence_row["Identification Max. taxonomy"],
