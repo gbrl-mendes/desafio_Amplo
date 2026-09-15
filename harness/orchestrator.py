@@ -305,7 +305,8 @@ def run(
         return result
 
     if output_csv is None:
-        output_csv = runs_dir / f"{Path(input_csv).stem}_curado.csv"
+        run_date = started_at[:10]  # started_at e um ISO datetime, "YYYY-MM-DD..."
+        output_csv = runs_dir / f"output_pos_curadoria_LLM-{run_date}.csv"
     output_csv = Path(output_csv)
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 

@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         dest="output_csv",
         default=None,
-        help="Caminho do CSV de saida (default: runs/<nome-da-entrada>_curado.csv).",
+        help="Caminho do CSV de saida (default: runs/output_pos_curadoria_LLM-<AAAA-MM-DD>.csv).",
     )
     parser.add_argument(
         "--runs-dir",

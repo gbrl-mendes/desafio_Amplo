@@ -15,7 +15,7 @@ Este documento descreve, em blocos, a curadoria taxonômica determinística da t
 **Uso via linha de comando:**
 
 ```{bash}
-Rscript curadoria_deterministica.R <entrada.csv> [--config=config.yaml] [--output=saida.csv]
+Rscript curadoria_deterministica.R <entrada.csv> [--config=config.yaml] [--output=output_pos_curadoria_LLM-AAAA-MM-DD.csv]
 ```
 
 **Uso interativo (RStudio/Positron):** abra o `.R` equivalente e rode `source()` (ou execute por seções com Ctrl+Enter); o `if (!interactive())` no fim impede que `main()` rode sozinho, então as funções deste documento ficam disponíveis para chamar uma a uma e inspecionar o resultado no Data Explorer.
@@ -1162,7 +1162,7 @@ O CSV exportado é reordenado e filtrado para compatibilidade com o formato "lon
 
     if (length(positional) < 1) {
       stop(
-        "Uso: Rscript curadoria_deterministica.R <entrada.csv> [--config=config.yaml] [--output=saida.csv]",
+        "Uso: Rscript curadoria_deterministica.R <entrada.csv> [--config=config.yaml] [--output=output_pos_curadoria_LLM-AAAA-MM-DD.csv]",
         call. = FALSE
       )
     }

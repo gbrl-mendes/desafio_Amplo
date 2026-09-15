@@ -9,6 +9,7 @@ rodar -> verificar -> logar).
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -95,6 +96,25 @@ def test_success_when_valid_input_and_r_succeeds(tmp_path):
     assert result.status == "success"
     assert result.output_path == str(output_csv)
     assert output_csv.exists()
+
+
+def test_default_output_filename_when_output_not_given(tmp_path):
+    df = _valid_input_df()
+    input_csv = tmp_path / "entrada.csv"
+    _write_input_csv(input_csv, df)
+    runs_dir = tmp_path / "runs"
+
+    result = run(
+        input_csv,
+        runs_dir=runs_dir,
+        r_runner=_fake_success_runner,
+        rscript_exe="rscript-fake",
+        llm_mode="off",
+    )
+
+    assert result.status == "success"
+    output_name = Path(result.output_path).name
+    assert re.fullmatch(r"output_pos_curadoria_LLM-\d{4}-\d{2}-\d{2}\.csv", output_name), output_name
 
 
 def test_refused_when_required_column_renamed_without_alias_config(tmp_path):

@@ -46,12 +46,12 @@ Vale só para essa sessão, não precisa de administrador.
 ## Execução
 
 ```bash
-python -m harness <entrada.csv> [--config config.yaml] [--output saida.csv] [--runs-dir runs/] [--llm-mode live|mock|off] [--reference spp_tradicional.csv]
+python -m harness <entrada.csv> [--config config.yaml] [--output output_pos_curadoria_LLM-AAAA-MM-DD.csv] [--runs-dir runs/] [--llm-mode live|mock|off] [--reference spp_tradicional.csv]
 ```
 
 - `<entrada.csv>`: obrigatório. Schema completo em [`data/reference/asv_input_schema.yaml`](data/reference/asv_input_schema.yaml).
 - `--config`: YAML opcional que sobrescreve os parâmetros padrão e permite usar um CSV com nomes de coluna diferentes dos que o sistema espera (ver "Configuração" abaixo). Fica registrado no log da execução, para rastreabilidade.
-- `--output`: caminho do CSV final. Por padrão, `runs/<nome-da-entrada>_curado.csv`.
+- `--output`: caminho do CSV final. Por padrão, `runs/output_pos_curadoria_LLM-<AAAA-MM-DD>.csv` (data da execução).
 - `--runs-dir`: pasta onde gravar o log de cada execução. Por padrão, `runs/`.
 - `--llm-mode`: um único parâmetro para as duas etapas que usam a Groq, a curadoria assistida (`harness/llm_curation.py`) e o relatório narrativo (`harness/report_generation.py`):
   - `live` (padrão): chama a Groq nas duas etapas, preenchendo as colunas `Assisted ID/Confidence/Justification (LLM)` e gravando o relatório em `runs/<timestamp>_relatorio.md`. Sem `GROQ_API_KEY` configurada, as duas etapas são puladas e a execução segue normalmente.
@@ -66,15 +66,15 @@ Código de saída do processo: `0` sucesso, `2` entrada recusada pela validaçã
 - **Uso simples**
 
 ```bash
-python -m harness data/example/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --output saida.csv
+python -m harness data/example/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv
 ```
 
-O dado de demonstração é um subset randomizado de 50 sequências (80 linhas, sequência × amostra) do projeto eDNA_Cipo, reduzido para manter o consumo de cota de API e o tempo de execução baixos. Grava `saida.csv`, um log em `runs/<timestamp>.json` e um relatório narrativo em `runs/<timestamp>_relatorio.md`.
+O dado de demonstração é um subset randomizado de 50 sequências (80 linhas, sequência × amostra) do projeto eDNA_Cipo, reduzido para manter o consumo de cota de API e o tempo de execução baixos. Sem `--output`, grava `runs/output_pos_curadoria_LLM-<AAAA-MM-DD>.csv`, um log em `runs/<timestamp>.json` e um relatório narrativo em `runs/<timestamp>_relatorio.md`.
 
 - **Uso com referência de amostragens tradicionais**
 
 ```bash
-python -m harness data/example/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/spp_tradicional.csv --output saida.csv
+python -m harness data/example/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/spp_tradicional.csv
 ```
 
 Mesma execução, mas a curadoria assistida também considera, por ponto de coleta, as espécies já registradas por métodos tradicionais na tabela de `--reference`.

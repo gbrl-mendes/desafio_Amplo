@@ -1,4 +1,4 @@
-## Rscript curadoria_deterministica.R <entrada.csv> [--config=config.yaml] [--output=saida.csv]
+## Rscript curadoria_deterministica.R <entrada.csv> [--config=config.yaml] [--output=output_pos_curadoria_LLM-AAAA-MM-DD.csv]
 
 # Garante que a biblioteca pessoal do usuario entra em .libPaths() mesmo
 # quando o script e chamado como subprocesso (ex. pelo harness em Python via
@@ -902,7 +902,7 @@ parse_cli_args <- function(args) {
 
   if (length(positional) < 1) {
     stop(
-      "Uso: Rscript curadoria_deterministica.R <entrada.csv> [--config=config.yaml] [--output=saida.csv]",
+      "Uso: Rscript curadoria_deterministica.R <entrada.csv> [--config=config.yaml] [--output=output_pos_curadoria_LLM-AAAA-MM-DD.csv]",
       call. = FALSE
     )
   }
