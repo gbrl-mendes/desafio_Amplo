@@ -3,7 +3,7 @@
 
 options(repos = c(CRAN = "https://cloud.r-project.org"))
 
-cran_packages <- c("tidyverse", "yaml", "taxize", "ape", "rgbif", "BiocManager")
+cran_packages <- c("tidyverse", "yaml", "taxize", "ape", "rgbif", "vegan", "BiocManager")
 to_install <- setdiff(cran_packages, rownames(installed.packages()))
 if (length(to_install) > 0) {
   cat(sprintf("Instalando do CRAN: %s\n", paste(to_install, collapse = ", ")))

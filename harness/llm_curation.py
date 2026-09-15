@@ -440,3 +440,19 @@ def run_llm_assisted_curation(
     df = df.drop(columns=ASSISTED_COLUMNS).merge(assisted_df, on="ASV header", how="left")
 
     return df, result
+
+
+def add_curated_id_column(df: pd.DataFrame) -> pd.DataFrame:
+    """Preenche `Curated ID`: a segunda opiniao da LLM (`Assisted ID (LLM)`)
+    onde existir, senao a identificacao deterministica (`Identification`, no
+    rank que o pseudo-score sustentar). Roda mesmo com `--llm-mode=off` (cai
+    inteiramente pra `Identification`, ja que `Assisted ID (LLM)` fica vazia).
+
+    E so uma sugestao de trabalho: o profissional que revisar o CSV pode
+    substituir qualquer valor aqui a mao antes de rodar a analise ecologica
+    (`r/analise_ecologica.R`), que usa esta coluna como identidade padrao de
+    cada ASV."""
+    df = df.copy()
+    assisted = df["Assisted ID (LLM)"] if "Assisted ID (LLM)" in df.columns else pd.Series(pd.NA, index=df.index)
+    df["Curated ID"] = assisted.where(assisted.notna(), df["Identification"])
+    return df

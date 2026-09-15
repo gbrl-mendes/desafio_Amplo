@@ -391,3 +391,70 @@ def test_failed_when_rscript_not_found(tmp_path, monkeypatch):
 
     assert result.status == "failed"
     assert result.error is not None and "Rscript" in result.error
+
+
+def _fake_eco_runner_success(rscript_exe, curated_csv, output_dir, config_path, traditional_species_csv, timeout):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "diversidade_alfa.csv").write_text("Ponto;Riqueza observada\nSC1;1\n", encoding="utf-8")
+    return subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
+
+
+def test_ecologia_off_by_default_does_not_call_eco_runner(tmp_path):
+    calls = []
+
+    def _fake_eco_runner(*args, **kwargs):
+        calls.append(args)
+        return _fake_eco_runner_success(*args, **kwargs)
+
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="off",
+        eco_runner=_fake_eco_runner,
+    )
+
+    assert result.status == "success"
+    assert calls == []
+    assert result.ecologia_output_dir is None
+
+
+def test_ecologia_true_calls_eco_runner_and_records_output_dir(tmp_path):
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="off",
+        ecologia=True,
+        eco_runner=_fake_eco_runner_success,
+    )
+
+    assert result.status == "success"
+    assert result.ecologia_exit_code == 0
+    assert result.ecologia_output_dir is not None
+    output_dir = Path(result.ecologia_output_dir)
+    assert output_dir.exists()
+    assert (output_dir / "diversidade_alfa.csv").exists()
+    assert result.ecologia_error is None
+
+
+def test_ecologia_failure_does_not_invalidate_successful_curation(tmp_path):
+    def _failing_eco_runner(rscript_exe, curated_csv, output_dir, config_path, traditional_species_csv, timeout):
+        raise RuntimeError("falha simulada na analise ecologica")
+
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="off",
+        ecologia=True,
+        eco_runner=_failing_eco_runner,
+    )
+
+    assert result.status == "success"  # a curadoria ja validada nao e derrubada
+    assert result.output_path is not None
+    assert result.ecologia_output_dir is None
+    assert result.ecologia_error is not None and "falha simulada" in result.ecologia_error

@@ -41,7 +41,12 @@ from typing import Callable, Optional
 
 import pandas as pd
 
-from harness.llm_curation import LlmCurationResult, load_traditional_species, run_llm_assisted_curation
+from harness.llm_curation import (
+    LlmCurationResult,
+    add_curated_id_column,
+    load_traditional_species,
+    run_llm_assisted_curation,
+)
 from harness.progress import (
     ConfirmFn,
     build_checkpoint_stats,
@@ -54,6 +59,7 @@ from tools.schema_validation import load_column_aliases, load_schema, validate_a
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 R_SCRIPT_PATH = REPO_ROOT / "r" / "curadoria_deterministica.R"
+ECO_SCRIPT_PATH = REPO_ROOT / "r" / "analise_ecologica.R"
 DEFAULT_RUNS_DIR = REPO_ROOT / "runs"
 
 # Colunas que so existem se o pipeline R realmente rodou os 6 blocos ate o
@@ -92,6 +98,9 @@ class RunResult:
     report_mode: Optional[str] = None
     report_error: Optional[str] = None
     checkpoint_path: Optional[str] = None
+    ecologia_output_dir: Optional[str] = None
+    ecologia_exit_code: Optional[int] = None
+    ecologia_error: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -135,27 +144,20 @@ def _stream_pipe_to_console(pipe, sink: list[str]) -> None:
     pipe.close()
 
 
-def default_r_runner(
-    rscript_exe: str,
-    input_csv: Path,
-    output_csv: Path,
-    config_path: Optional[Path],
-    timeout: int,
-) -> subprocess.CompletedProcess:
-    args = [rscript_exe, str(R_SCRIPT_PATH), str(input_csv), f"--output={output_csv}"]
-    if config_path is not None:
-        args.append(f"--config={config_path}")
-    # Nota: em alguns ambientes Windows, mensagens de console do R (cat/
-    # message) podem sair com acentos corrompidos aqui (mismatch de
-    # encoding entre a codepage nativa do SO e UTF-8) -- isso afeta so texto
-    # de diagnostico (impresso ao vivo e no r_stdout_tail/r_stderr_tail do
-    # log), nunca os dados da curadoria em si: o CSV de saida e sempre
-    # lido/escrito como UTF-8 (ver verify_output) e nao e afetado.
-    #
-    # stdout/stderr sao transmitidos ao vivo (linha a linha, em threads
-    # separadas) em vez de capturados silenciosamente -- e assim que o
-    # usuario acompanha o progresso dos 6 blocos do R (consulta de
-    # taxonomia, GBIF, etc.) enquanto a execucao roda, nao so no final.
+def run_streaming_subprocess(args: list[str], timeout: int) -> subprocess.CompletedProcess:
+    """Roda um subprocesso transmitindo stdout/stderr ao vivo (linha a linha,
+    em threads separadas) em vez de capturar silenciosamente -- e assim que o
+    usuario acompanha o progresso de um script R rodando (consulta de
+    taxonomia, GBIF, etc.) enquanto a execucao roda, nao so no final. Usado
+    tanto pela curadoria deterministica quanto pela analise ecologica.
+
+    Nota: em alguns ambientes Windows, mensagens de console do R (cat/
+    message) podem sair com acentos corrompidos aqui (mismatch de encoding
+    entre a codepage nativa do SO e UTF-8) -- isso afeta so texto de
+    diagnostico (impresso ao vivo e no stdout/stderr do log), nunca os dados
+    calculados em si: todo CSV de saida e sempre lido/escrito como UTF-8 e
+    nao e afetado.
+    """
     proc = subprocess.Popen(
         args,
         stdout=subprocess.PIPE,
@@ -185,6 +187,38 @@ def default_r_runner(
     return subprocess.CompletedProcess(
         args=args, returncode=returncode, stdout="".join(stdout_lines), stderr="".join(stderr_lines)
     )
+
+
+def default_r_runner(
+    rscript_exe: str,
+    input_csv: Path,
+    output_csv: Path,
+    config_path: Optional[Path],
+    timeout: int,
+) -> subprocess.CompletedProcess:
+    args = [rscript_exe, str(R_SCRIPT_PATH), str(input_csv), f"--output={output_csv}"]
+    if config_path is not None:
+        args.append(f"--config={config_path}")
+    return run_streaming_subprocess(args, timeout)
+
+
+EcoRunner = Callable[..., subprocess.CompletedProcess]
+
+
+def default_eco_runner(
+    rscript_exe: str,
+    curated_csv: Path,
+    output_dir: Path,
+    config_path: Optional[Path],
+    traditional_species_csv: Optional[Path],
+    timeout: int,
+) -> subprocess.CompletedProcess:
+    args = [rscript_exe, str(ECO_SCRIPT_PATH), str(curated_csv), f"--output-dir={output_dir}"]
+    if config_path is not None:
+        args.append(f"--config={config_path}")
+    if traditional_species_csv is not None:
+        args.append(f"--reference={traditional_species_csv}")
+    return run_streaming_subprocess(args, timeout)
 
 
 def verify_output(output_path: Path, expected_row_count: int) -> list[str]:
@@ -237,10 +271,12 @@ def run(
     traditional_species_csv: str | Path | None = None,
     confirm_llm_stage: ConfirmFn = default_confirm_llm_stage,
     assume_yes: bool = False,
+    ecologia: bool = False,
+    eco_runner: EcoRunner = default_eco_runner,
 ) -> RunResult:
     """Executa uma rodada completa: resumo da entrada -> valida -> roda o R
     (saida ao vivo) -> verifica -> checkpoint -> curadoria assistida por LLM
-    (opcional) -> loga.
+    (opcional) -> analise ecologica (opcional) -> loga.
 
     `confirm_llm_stage`: injetavel de proposito, mesmo padrao de `r_runner`
     -- os testes passam uma funcao falsa em vez de depender de stdin. O
@@ -273,9 +309,16 @@ def run(
 
     `traditional_species_csv`: caminho opcional para a tabela de especies
     obtidas por metodos tradicionais de monitoramento (ver
-    `harness.llm_curation.load_traditional_species`), usada so como
-    evidencia adicional na curadoria assistida por LLM. Sem ela, essa
-    etapa roda normalmente, so sem essa evidencia extra.
+    `harness.llm_curation.load_traditional_species`), usada tanto como
+    evidencia adicional na curadoria assistida por LLM quanto (se
+    `ecologia=True`) na comparacao eDNA x metodos tradicionais.
+
+    `ecologia`: quando True, roda `r/analise_ecologica.R` sobre o CSV final
+    (com `Curated ID` ja preenchida) logo apos a curadoria assistida, escrevendo
+    tabelas e graficos em `runs/<timestamp>_ecologia/`. Uma falha aqui nunca
+    invalida a curadoria ja concluida e verificada, so fica registrada em
+    `ecologia_error`. `eco_runner` e injetavel de proposito, mesmo padrao de
+    `r_runner`.
     """
     input_csv = Path(input_csv)
     config_path = Path(config_path) if config_path else None
@@ -411,6 +454,7 @@ def run(
             curated_df, llm_result = run_llm_assisted_curation(
                 curated_df, mode=effective_llm_mode, traditional_species_df=traditional_species_df
             )
+            curated_df = add_curated_id_column(curated_df)
             curated_df.to_csv(output_csv, sep=";", decimal=",", index=False, encoding="utf-8")
         except Exception as exc:
             # A curadoria deterministica ja passou na verificacao acima --
@@ -448,6 +492,36 @@ def run(
         report_file.write_text(report_text, encoding="utf-8")
         report_path = str(report_file)
 
+    ecologia_output_dir = None
+    ecologia_exit_code = None
+    ecologia_error = None
+    if ecologia and status == "success" and curated_df is not None:
+        eco_resolved_rscript = rscript_exe or find_rscript()
+        if eco_resolved_rscript is None:
+            ecologia_error = "Rscript nao encontrado -- analise ecologica pulada."
+        else:
+            try:
+                eco_timestamp = started_at.replace(":", "-").replace("+00-00", "Z")
+                eco_dir = runs_dir / f"{eco_timestamp}_ecologia"
+                print("\n=== Analise ecologica ===")
+                eco_proc = eco_runner(
+                    eco_resolved_rscript,
+                    output_csv,
+                    eco_dir,
+                    config_path,
+                    Path(traditional_species_csv) if traditional_species_csv else None,
+                    timeout,
+                )
+                ecologia_exit_code = eco_proc.returncode
+                if eco_proc.returncode == 0:
+                    ecologia_output_dir = str(eco_dir)
+                else:
+                    ecologia_error = f"analise_ecologica.R terminou com codigo {eco_proc.returncode}."
+            except Exception as exc:
+                # Mesma logica de protecao das etapas acima: uma falha aqui
+                # nao invalida a curadoria (e o LLM) ja concluidos e verificados.
+                ecologia_error = f"Falha inesperada na analise ecologica: {exc}"
+
     result = RunResult(
         status=status,
         input_path=str(input_csv),
@@ -469,6 +543,9 @@ def run(
         report_mode=report_result.mode if report_result else None,
         report_error=report_result.error if report_result else None,
         checkpoint_path=checkpoint_path,
+        ecologia_output_dir=ecologia_output_dir,
+        ecologia_exit_code=ecologia_exit_code,
+        ecologia_error=ecologia_error,
     )
     write_run_log(result, runs_dir)
     return result

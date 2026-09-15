@@ -13,7 +13,9 @@ Veja [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md) para o problema, o domínio,
 | [`tools/schema_validation.py`](tools/schema_validation.py)         | Valida o contrato de entrada (Python). Recusa a execução antes de rodar qualquer coisa se faltar coluna obrigatória, houver vazamento de gabarito, ou a chave primária for duplicada.                                                                                                                                                                                                                                                                                                                            |
 | [`r/curadoria_deterministica.qmd`](r/curadoria_deterministica.qmd) | Toda a lógica determinística (R): leitura do CSV, refinamento dos três melhores hits de BLAST (busca por similaridade de sequência num banco de referência), consulta de taxonomia ao NCBI, checagem de contaminação contra os controles, faixa de tamanho esperada por marcador genético, pseudo-score (nota de confiança combinando identidade e cobertura do alinhamento), árvore filogenética entre as sequências, e checagem de ocorrência regional no GBIF (banco público de registros de biodiversidade). |
 | [`r/curadoria_deterministica.R`](r/curadoria_deterministica.R)     | Versão executável, gerada do `.qmd` acima. É o arquivo que o harness realmente chama, como um subprocesso separado.                                                                                                                                                                                                                                                                                                                                                                                              |
-| [`harness/orchestrator.py`](harness/orchestrator.py)               | Integração de todas as etapas: validação da entrada, execução do pipeline em R, verificação do output do R, chamada da curadoria assistida por LLM, geração do relatório narrativo, e gravação do log em JSON de cada execução.                                                                                                                                                                                                                                                                                  |
+| [`r/analise_ecologica.qmd`](r/analise_ecologica.qmd)                | Análise ecológica opcional (R): riqueza, diversidade (Shannon/Simpson), curva de acumulação, dissimilaridade entre pontos, composição taxonômica, comparação eDNA × métodos tradicionais. Roda sobre a coluna `Curated ID` do CSV já curado, não refaz identificação nenhuma.                                                                                                                                                                                                                                    |
+| [`r/analise_ecologica.R`](r/analise_ecologica.R)                    | Versão executável, gerada do `.qmd` acima.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| [`harness/orchestrator.py`](harness/orchestrator.py)               | Integração de todas as etapas: validação da entrada, execução do pipeline em R, verificação do output do R, chamada da curadoria assistida por LLM, geração do relatório narrativo, análise ecológica opcional, e gravação do log em JSON de cada execução.                                                                                                                                                                                                                                                      |
 | [`harness/llm_curation.py`](harness/llm_curation.py)               | Curadoria assistida por LLM, via Groq.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | [`harness/report_generation.py`](harness/report_generation.py)     | Relatório narrativo da execução, também via Groq, a partir dos agregados gerados nas etapas anteriores.                                                                                                                                                                                                                                                                                                                                                                                                          |
 | [`harness/__main__.py`](harness/__main__.py)                       | Ponto de entrada da linha de comando (`python -m harness`).                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -21,7 +23,7 @@ Veja [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md) para o problema, o domínio,
 ## Requisitos
 
 - **Python 3.11+**, de preferência num ambiente virtual (`pip install -r requirements.txt`).
-- **R 4.x** com os pacotes listados em [`r/install_packages.R`](r/install_packages.R). Rode uma vez: `Rscript r/install_packages.R` (inclui tidyverse, yaml, taxize, ape, rgbif e, via Bioconductor, DECIPHER/Biostrings).
+- **R 4.x** com os pacotes listados em [`r/install_packages.R`](r/install_packages.R). Rode uma vez: `Rscript r/install_packages.R` (inclui tidyverse, yaml, taxize, ape, rgbif, vegan e, via Bioconductor, DECIPHER/Biostrings).
 - Acesso à internet durante a execução: as consultas ao NCBI (taxonomia) e ao GBIF (ocorrência regional) fazem parte do pipeline determinístico, não só da parte de LLM.
 - Opcional: uma chave de API gratuita da [Groq](https://console.groq.com/keys) para a curadoria assistida e o relatório narrativo, já incluída em `.env` neste repositório privado. Sem chave, as duas etapas são puladas automaticamente e o resto do pipeline roda normalmente.
 
@@ -46,7 +48,7 @@ Vale só para essa sessão, não precisa de administrador.
 ## Execução
 
 ```bash
-python -m harness <entrada.csv> [--config config.yaml] [--output output_pos_curadoria_LLM-AAAA-MM-DD.csv] [--runs-dir runs/] [--llm-mode live|mock|off] [--reference spp_tradicional.csv]
+python -m harness <entrada.csv> [--config config.yaml] [--output output_pos_curadoria_LLM-AAAA-MM-DD.csv] [--runs-dir runs/] [--llm-mode live|mock|off] [--reference spp_tradicional.csv] [--ecologia]
 ```
 
 - `<entrada.csv>`: obrigatório. Schema completo em [`data/reference/asv_input_schema.yaml`](data/reference/asv_input_schema.yaml).
@@ -57,7 +59,10 @@ python -m harness <entrada.csv> [--config config.yaml] [--output output_pos_cura
   - `live` (padrão): chama a Groq nas duas etapas, preenchendo as colunas `Assisted ID/Confidence/Justification (LLM)` e gravando o relatório em `runs/<timestamp>_relatorio.md`. Sem `GROQ_API_KEY` configurada, as duas etapas são puladas e a execução segue normalmente.
   - `mock`: não chama a Groq, preenche as mesmas colunas e o mesmo relatório com uma resposta simulada, para testar o encadeamento sem gastar cota de API.
   - `off`: pula as duas etapas por completo. Sai só o CSV do pipeline em R e o log JSON, sem colunas assistidas e sem relatório narrativo.
-- `--reference`: CSV opcional (`;`-delimitado, UTF-8, pelo menos 2 colunas: ponto amostral na primeira, taxon na última ou numa coluna chamada `Taxon_binomial`; colunas extras no meio, e o nome literal de cada coluna, são irrelevantes) com espécies já registradas por métodos tradicionais nos mesmos pontos amostrais, usado como evidência adicional na curadoria assistida (ver [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md)). Exemplo em [`data/example/exemplo_1/spp_tradicional.csv`](data/example/exemplo_1/spp_tradicional.csv).
+- `--reference`: CSV opcional (`;`-delimitado, UTF-8, pelo menos 2 colunas: ponto amostral na primeira, taxon na última ou numa coluna chamada `Taxon_binomial`; colunas extras no meio, e o nome literal de cada coluna, são irrelevantes) com espécies já registradas por métodos tradicionais nos mesmos pontos amostrais, usado como evidência adicional na curadoria assistida (ver [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md)). Também alimenta a comparação eDNA × tradicional de `--ecologia`, se essa flag for usada. Exemplo em [`data/example/exemplo_1/spp_tradicional.csv`](data/example/exemplo_1/spp_tradicional.csv).
+- `--ecologia`: roda a análise ecológica ([`r/analise_ecologica.qmd`](r/analise_ecologica.qmd)) logo após a curadoria assistida, sobre a coluna `Curated ID` do CSV final. Escreve tabelas e gráficos em `runs/<timestamp>_ecologia/`. Desligada por padrão; uma falha aqui nunca invalida a curadoria já concluída, só fica registrada no log.
+
+O CSV final sempre traz uma coluna `Curated ID`, preenchida automaticamente (`Assisted ID (LLM)` quando existir, senão a identificação determinística). É só uma sugestão de trabalho: o profissional que revisar o CSV pode substituir qualquer valor a mão antes de rodar `--ecologia` (ou rodar `Rscript r/analise_ecologica.R` direto sobre o CSV editado, sem refazer a curadoria).
 
 Código de saída do processo: `0` sucesso, `2` entrada recusada pela validação, `3` falha na execução.
 
@@ -86,6 +91,14 @@ python -m harness data/example/exemplo_2/dasafio_Amplo-roots_metabar_subset_outp
 ```
 
 Segundo dado de demonstração, do projeto `roots_metabar` (raízes, primer ITS2, plantas), de domínio taxonômico e origem diferentes do primeiro. Não tem dados de latitude/longitude, então a checagem regional por GBIF é pulada. O `--config` aponta o grupo taxonômico alvo para `Plantae` e mapeia o nome de coluna de controle próprio deste dataset (`PCR control`) para o nome interno esperado.
+
+- **Com análise ecológica**
+
+```bash
+python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia
+```
+
+Mesma execução do primeiro exemplo, mas com `--ecologia`: além do CSV curado, grava riqueza/diversidade por ponto, curva de acumulação, dissimilaridade entre pontos, composição taxonômica e a comparação eDNA × tradicional em `runs/<timestamp>_ecologia/`.
 
 ## Configuração: `--config`
 
@@ -125,6 +138,14 @@ taxons_alvo:
 checagem_regional:
   fonte: gbif
   buffer_graus: 0.1
+
+ecologia:
+  coluna_grupo: Ponto
+  coluna_id: Curated ID
+  rank_taxonomico: Family (NCBI)
+  metodo_dissimilaridade: bray
+  min_amostras_curva_acumulacao: 2
+  metadados_grupo: [Habitat, Rios]
 ```
 
 **`colunas_alias`.** Resolve a diferença entre o nome de coluna que o seu CSV usa e o nome que o sistema espera internamente. Esse segundo nome, o "canônico", é a lista fixa definida em [`data/reference/asv_input_schema.yaml`](data/reference/asv_input_schema.yaml) (`Researcher`, `Project`, `1_subject header`, `Ponto`, `Latitude`, e assim por diante), o mesmo contrato que `tools/schema_validation.py` usa pra checar coluna obrigatória.
@@ -158,6 +179,15 @@ Isso renomeia a coluna para `Researcher` antes de qualquer outra etapa rodar, in
 - `fonte`: de onde vêm os registros de ocorrência regional; só `"gbif"` está implementado, outro valor pula a etapa com aviso.
 - `buffer_graus`: margem (grau decimal) somada em cada lado do bounding box calculado a partir do min/max de `Latitude`/`Longitude` dos pontos amostrados nos dados. Default `0.1` (~11 km).
 - `area_bbox` (opcional): bounding box fixo (`lat_min`, `lat_max`, `long_min`, `long_max`, grau decimal), usado no lugar do cálculo automático quando declarado. Sem `Latitude`/`Longitude` nos dados e sem `area_bbox`, a checagem regional é pulada com aviso.
+
+**`ecologia`.** Só usado com a flag `--ecologia` (ver "Execução").
+
+- `coluna_grupo`: coluna usada como unidade espacial (site × taxon) em toda a análise. Default `Ponto`.
+- `coluna_id`: identidade de cada ASV usada nas contagens de riqueza/diversidade. Default `Curated ID`.
+- `rank_taxonomico`: coluna de rank taxonômico usada no gráfico de composição; qualquer coluna `X (NCBI)` presente na saída serve. Default `Family (NCBI)`.
+- `metodo_dissimilaridade`: `bray` (baseado em abundância) ou `jaccard` (presença/ausência), usado na dissimilaridade entre pontos. Default `bray`.
+- `min_amostras_curva_acumulacao`: mínimo de amostras (por ponto, ou no total) para tentar uma curva de acumulação; abaixo disso, pulada com aviso em vez de quebrar. Default `2`.
+- `metadados_grupo`: colunas de metadado opcional a quebrar riqueza/diversidade por categoria, quando presentes nos dados. Default `[Habitat, Rios]`.
 
 ## Formatos de entrada e saída
 

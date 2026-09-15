@@ -12,6 +12,7 @@ import pytest
 
 from harness.llm_curation import (
     ASSISTED_COLUMNS,
+    add_curated_id_column,
     build_asv_evidence,
     build_traditional_evidence_text,
     extract_groq_error_message,
@@ -369,3 +370,27 @@ def test_load_traditional_species_falls_back_to_last_column_without_taxon_binomi
 
     assert list(df.columns) == ["Ponto", "Taxon_binomial"]
     assert df.iloc[0]["Taxon_binomial"] == "x"
+
+
+def test_add_curated_id_column_prefers_assisted_id_over_deterministic():
+    df = pd.DataFrame(
+        {
+            "Identification": ["Astyanax lacustris", "Characidae"],
+            "Assisted ID (LLM)": ["Astyanax fasciatus", pd.NA],
+        }
+    )
+
+    result = add_curated_id_column(df)
+
+    assert list(result["Curated ID"]) == ["Astyanax fasciatus", "Characidae"]
+
+
+def test_add_curated_id_column_falls_back_to_deterministic_without_llm_column():
+    # --llm-mode=off nunca chama a Groq, mas Assisted ID (LLM) ainda existe
+    # (preenchida com NA por run_llm_assisted_curation); mesmo se a coluna
+    # faltasse por algum motivo, Curated ID nao pode quebrar.
+    df = pd.DataFrame({"Identification": ["Unidentified"]})
+
+    result = add_curated_id_column(df)
+
+    assert list(result["Curated ID"]) == ["Unidentified"]

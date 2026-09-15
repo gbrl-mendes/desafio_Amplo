@@ -72,6 +72,15 @@ def build_parser() -> argparse.ArgumentParser:
             "interativo com --llm-mode=live a execucao para nesse ponto e pergunta."
         ),
     )
+    parser.add_argument(
+        "--ecologia",
+        action="store_true",
+        help=(
+            "Roda a analise ecologica (r/analise_ecologica.R) logo apos a curadoria assistida, "
+            "sobre a coluna Curated ID do CSV final. Escreve tabelas e graficos em "
+            "runs/<timestamp>_ecologia/. Desligada por padrao."
+        ),
+    )
     return parser
 
 
@@ -86,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
         llm_mode=args.llm_mode,
         traditional_species_csv=args.traditional_species_csv,
         assume_yes=args.assume_yes,
+        ecologia=args.ecologia,
     )
 
     print(f"Status: {result.status}")
@@ -134,6 +144,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Geracao do relatorio falhou: {result.report_error}")
     elif result.report_mode == "off":
         print("Geracao do relatorio pulada (mesmo motivo da curadoria assistida, ver acima).")
+
+    if result.ecologia_output_dir:
+        print(f"Analise ecologica: {result.ecologia_output_dir}")
+    elif result.ecologia_error:
+        print(f"Analise ecologica falhou: {result.ecologia_error}")
 
     return 0
 

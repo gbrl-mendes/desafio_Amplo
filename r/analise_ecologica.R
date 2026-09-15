@@ -1,0 +1,422 @@
+## Rscript analise_ecologica.R <curado.csv> [--config=config.yaml] [--reference=tradicional.csv] [--output-dir=runs/AAAA-MM-DDThh-mm-ss_ecologia]
+
+user_lib <- Sys.getenv("R_LIBS_USER")
+if (nzchar(user_lib) && dir.exists(user_lib) && !(user_lib %in% .libPaths())) {
+  .libPaths(c(user_lib, .libPaths()))
+}
+
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(yaml)
+  library(vegan)
+})
+
+get_repo_root <- function() {
+  cli_args <- commandArgs(trailingOnly = FALSE)
+  file_arg <- grep("^--file=", cli_args, value = TRUE)
+  if (length(file_arg) > 0) {
+    script_path <- normalizePath(sub("^--file=", "", file_arg[1]))
+    return(dirname(dirname(script_path)))
+  }
+  if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable()) {
+    ctx_path <- tryCatch(rstudioapi::getSourceEditorContext()$path, error = function(e) "")
+    if (nzchar(ctx_path)) return(dirname(dirname(normalizePath(ctx_path))))
+  }
+  getwd()
+}
+
+REPO_ROOT <- get_repo_root()
+
+if (!identical(normalizePath(getwd()), normalizePath(REPO_ROOT))) {
+  message(sprintf("Ajustando diretorio de trabalho para a raiz do repo: %s", REPO_ROOT))
+  setwd(REPO_ROOT)
+}
+
+DEFAULT_ECO_CONFIG <- list(
+  ecologia = list(
+    # Coluna que define o agrupamento espacial (site x taxon). "Ponto" e
+    # obrigatoria em todo dataset do projeto, entao e o default universal.
+    coluna_grupo = "Ponto",
+    # Identidade de cada ASV usada nas contagens de riqueza/diversidade --
+    # ver nota sobre Curated ID no topo deste documento.
+    coluna_id = "Curated ID",
+    coluna_abundancia = "ASV absolute abundance",
+    # Rank taxonomico usado no grafico de composicao -- qualquer coluna
+    # "X (NCBI)" presente na saida da curadoria serve, peixe ou planta.
+    rank_taxonomico = "Family (NCBI)",
+    # "bray" (baseado em abundancia) ou "jaccard" (presenca/ausencia).
+    metodo_dissimilaridade = "bray",
+    # Minimo de amostras (por ponto, ou no total) pra tentar uma curva de
+    # acumulacao -- abaixo disso a curva e pulada com aviso, nao quebra.
+    min_amostras_curva_acumulacao = 2,
+    # Colunas de metadado opcionais a quebrar riqueza/diversidade por
+    # categoria, quando presentes nos dados (ver asv_input_schema.yaml).
+    metadados_grupo = c("Habitat", "Rios")
+  )
+)
+
+load_eco_config <- function(config_path = NULL, defaults = DEFAULT_ECO_CONFIG) {
+  if (is.null(config_path)) return(defaults)
+  if (!file.exists(config_path)) {
+    stop(sprintf("Arquivo de config '%s' nao encontrado.", config_path), call. = FALSE)
+  }
+  user_config <- yaml::read_yaml(config_path)
+  utils::modifyList(defaults, user_config, keep.null = TRUE)
+}
+
+read_curated_csv <- function(path) {
+  readr::read_delim(
+    path,
+    delim = ";",
+    locale = readr::locale(decimal_mark = ",", encoding = "UTF-8"),
+    quote = "\"",
+    show_col_types = FALSE,
+    progress = FALSE
+  )
+}
+
+check_ecology_columns <- function(df, eco_config) {
+  needed <- c(eco_config$coluna_grupo, eco_config$coluna_id, eco_config$coluna_abundancia, "Sample", "Type")
+  missing <- setdiff(needed, names(df))
+  if (length(missing) > 0) {
+    stop(sprintf(
+      "Coluna(s) necessaria(s) para a analise ecologica ausente(s) no CSV: %s.",
+      paste(missing, collapse = ", ")
+    ), call. = FALSE)
+  }
+}
+
+prepare_ecology_table <- function(df, eco_config) {
+  id_col <- eco_config$coluna_id
+  group_col <- eco_config$coluna_grupo
+
+  n_total <- nrow(df)
+  df <- df %>% dplyr::filter(tolower(trimws(Type)) == "sample")
+  n_sample <- nrow(df)
+  if (n_sample < n_total) {
+    message(sprintf("%d de %d linhas eram controle (Type != \"Sample\") -- excluidas da analise ecologica.", n_total - n_sample, n_total))
+  }
+
+  n_before_group <- nrow(df)
+  df <- df %>% dplyr::filter(!is.na(.data[[group_col]]))
+  if (nrow(df) < n_before_group) {
+    message(sprintf(
+      "%d linha(s) sem %s (grupo vazio) -- excluidas da analise ecologica.",
+      n_before_group - nrow(df), group_col
+    ))
+  }
+
+  n_before_id <- nrow(df)
+  df <- df %>% dplyr::filter(!is.na(.data[[id_col]]), .data[[id_col]] != "Unidentified")
+  if (nrow(df) < n_before_id) {
+    message(sprintf(
+      "%d linha(s) sem identidade utilizavel (%s vazia ou \"Unidentified\") -- excluidas da analise ecologica.",
+      n_before_id - nrow(df), id_col
+    ))
+  }
+
+  df
+}
+
+build_group_taxon_matrix <- function(df, group_col, id_col, abundance_col) {
+  df %>%
+    dplyr::group_by(.data[[group_col]], .data[[id_col]]) %>%
+    dplyr::summarise(abundancia = sum(.data[[abundance_col]], na.rm = TRUE), .groups = "drop") %>%
+    tidyr::pivot_wider(names_from = tidyselect::all_of(id_col), values_from = abundancia, values_fill = 0)
+}
+
+matrix_only <- function(group_taxon_wide) {
+  mat <- as.matrix(group_taxon_wide[, -1, drop = FALSE])
+  rownames(mat) <- group_taxon_wide[[1]]
+  mat
+}
+
+compute_alpha_diversity <- function(group_taxon_wide, group_col) {
+  mat <- matrix_only(group_taxon_wide)
+  tibble::tibble(
+    !!group_col := group_taxon_wide[[1]],
+    "Riqueza observada" = vegan::specnumber(mat),
+    "Shannon" = vegan::diversity(mat, index = "shannon"),
+    "Simpson" = vegan::diversity(mat, index = "simpson")
+  )
+}
+
+plot_alpha_diversity <- function(alpha_tbl, group_col) {
+  alpha_tbl %>%
+    tidyr::pivot_longer(-tidyselect::all_of(group_col), names_to = "indice", values_to = "valor") %>%
+    ggplot2::ggplot(ggplot2::aes(x = .data[[group_col]], y = valor, fill = .data[[group_col]])) +
+    ggplot2::geom_col() +
+    ggplot2::facet_wrap(~indice, scales = "free_y") +
+    ggplot2::labs(x = group_col, y = "Valor", fill = group_col) +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1), legend.position = "none")
+}
+
+compute_accumulation_curve <- function(df, eco_config) {
+  group_col <- eco_config$coluna_grupo
+  id_col <- eco_config$coluna_id
+  min_amostras <- eco_config$min_amostras_curva_acumulacao
+
+  sample_wide <- build_group_taxon_matrix(df, "Sample", id_col, eco_config$coluna_abundancia)
+  sample_ponto <- df %>% dplyr::distinct(Sample, .data[[group_col]])
+
+  run_specaccum <- function(wide_subset, label) {
+    if (nrow(wide_subset) < min_amostras) {
+      warning(sprintf(
+        "%s tem menos de %d amostras -- curva de acumulacao pulada.",
+        label, min_amostras
+      ), call. = FALSE)
+      return(NULL)
+    }
+    mat_bin <- (matrix_only(wide_subset) > 0) * 1
+    ac <- tryCatch(vegan::specaccum(mat_bin, method = "random"), error = function(e) NULL)
+    if (is.null(ac)) {
+      warning(sprintf("Nao foi possivel calcular a curva de acumulacao para %s.", label), call. = FALSE)
+      return(NULL)
+    }
+    tibble::tibble(amostras = ac$sites, riqueza = ac$richness, sd = ac$sd)
+  }
+
+  geral <- run_specaccum(sample_wide, "O conjunto de amostras inteiro")
+
+  grupos <- unique(sample_ponto[[group_col]])
+  por_grupo <- purrr::map(grupos, function(g) {
+    samples_g <- sample_ponto$Sample[sample_ponto[[group_col]] == g]
+    subset_wide <- sample_wide %>% dplyr::filter(Sample %in% samples_g)
+    resultado <- run_specaccum(subset_wide, sprintf("%s '%s'", group_col, g))
+    if (is.null(resultado)) return(NULL)
+    dplyr::mutate(resultado, !!group_col := g)
+  })
+  por_grupo <- dplyr::bind_rows(por_grupo)
+
+  list(geral = geral, por_grupo = if (nrow(por_grupo) > 0) por_grupo else NULL)
+}
+
+plot_accumulation_curve <- function(curva_por_grupo, group_col) {
+  if (is.null(curva_por_grupo)) return(NULL)
+  curva_por_grupo %>%
+    ggplot2::ggplot(ggplot2::aes(x = amostras, y = riqueza, colour = .data[[group_col]])) +
+    ggplot2::geom_line(linewidth = 1, alpha = 0.8) +
+    ggplot2::geom_point(size = 1.5) +
+    ggplot2::labs(x = "Amostras", y = "Riqueza acumulada", colour = group_col) +
+    ggplot2::theme_minimal()
+}
+
+compute_beta_dissimilarity <- function(group_taxon_wide, method = "bray") {
+  if (nrow(group_taxon_wide) < 2) {
+    warning("Menos de 2 grupos com dados -- dissimilaridade entre pontos pulada.", call. = FALSE)
+    return(NULL)
+  }
+  mat <- matrix_only(group_taxon_wide)
+  dist_mat <- vegan::vegdist(mat, method = method)
+  list(dist = dist_mat, hclust = stats::hclust(dist_mat, method = "average"))
+}
+
+save_dendrogram_plot <- function(beta_result, path, group_col) {
+  if (is.null(beta_result)) return(invisible(NULL))
+  grDevices::png(path, width = 1600, height = 1000, res = 150)
+  on.exit(grDevices::dev.off())
+  plot(beta_result$hclust, main = sprintf("Dissimilaridade entre %s", group_col), xlab = group_col, sub = "")
+}
+
+compute_taxonomic_composition <- function(df, eco_config) {
+  rank_col <- eco_config$rank_taxonomico
+  if (!(rank_col %in% names(df))) {
+    warning(sprintf("Coluna de rank taxonomico '%s' nao encontrada -- composicao taxonomica pulada.", rank_col), call. = FALSE)
+    return(NULL)
+  }
+  group_col <- eco_config$coluna_grupo
+  df %>%
+    dplyr::filter(!is.na(.data[[rank_col]])) %>%
+    dplyr::group_by(.data[[group_col]], .data[[rank_col]]) %>%
+    dplyr::summarise(abundancia = sum(.data[[eco_config$coluna_abundancia]], na.rm = TRUE), .groups = "drop") %>%
+    dplyr::group_by(.data[[group_col]]) %>%
+    dplyr::mutate(proporcao = abundancia / sum(abundancia)) %>%
+    dplyr::ungroup()
+}
+
+plot_taxonomic_composition <- function(composicao, eco_config) {
+  if (is.null(composicao)) return(NULL)
+  group_col <- eco_config$coluna_grupo
+  rank_col <- eco_config$rank_taxonomico
+  composicao %>%
+    ggplot2::ggplot(ggplot2::aes(x = .data[[group_col]], y = proporcao, fill = .data[[rank_col]])) +
+    ggplot2::geom_col(position = "stack") +
+    ggplot2::labs(x = group_col, y = "Proporção", fill = rank_col) +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+}
+
+compute_metadata_breakdown <- function(df, eco_config) {
+  id_col <- eco_config$coluna_id
+  resultado <- list()
+  for (meta_col in eco_config$metadados_grupo) {
+    if (!(meta_col %in% names(df)) || all(is.na(df[[meta_col]]))) next
+    wide <- build_group_taxon_matrix(
+      df %>% dplyr::filter(!is.na(.data[[meta_col]])),
+      meta_col, id_col, eco_config$coluna_abundancia
+    )
+    resultado[[meta_col]] <- compute_alpha_diversity(wide, meta_col)
+  }
+  resultado
+}
+
+compute_shared_exclusive_taxa <- function(group_taxon_wide, group_col) {
+  group_taxon_wide %>%
+    tidyr::pivot_longer(-tidyselect::all_of(group_col), names_to = "taxon", values_to = "abundancia") %>%
+    dplyr::filter(abundancia > 0) %>%
+    dplyr::group_by(taxon) %>%
+    dplyr::summarise(
+      n_pontos = dplyr::n_distinct(.data[[group_col]]),
+      pontos = paste(sort(unique(.data[[group_col]])), collapse = ", "),
+      .groups = "drop"
+    ) %>%
+    dplyr::mutate(status = ifelse(n_pontos == 1, "Exclusivo", "Compartilhado")) %>%
+    dplyr::arrange(dplyr::desc(n_pontos), taxon)
+}
+
+read_traditional_species <- function(path) {
+  df <- readr::read_delim(
+    path, delim = ";", locale = readr::locale(encoding = "UTF-8"),
+    show_col_types = FALSE, progress = FALSE
+  )
+  if (ncol(df) < 2) {
+    stop("Tabela de especies tradicionais precisa ter pelo menos 2 colunas (ponto, taxon).", call. = FALSE)
+  }
+  taxon_col <- if ("Taxon_binomial" %in% names(df)) "Taxon_binomial" else names(df)[ncol(df)]
+  df %>%
+    dplyr::select(Ponto = 1, Taxon_binomial = tidyselect::all_of(taxon_col)) %>%
+    dplyr::distinct()
+}
+
+compare_edna_traditional <- function(df, traditional_df, eco_config) {
+  group_col <- eco_config$coluna_grupo
+  id_col <- eco_config$coluna_id
+
+  edna <- df %>%
+    dplyr::distinct(.data[[group_col]], .data[[id_col]]) %>%
+    dplyr::select(Ponto = tidyselect::all_of(group_col), Taxon = tidyselect::all_of(id_col)) %>%
+    dplyr::mutate(Metodo = "eDNA")
+
+  tradicional <- traditional_df %>%
+    dplyr::select(Ponto, Taxon = Taxon_binomial) %>%
+    dplyr::distinct() %>%
+    dplyr::mutate(Metodo = "Tradicional")
+
+  dplyr::bind_rows(edna, tradicional) %>%
+    dplyr::group_by(Taxon) %>%
+    dplyr::summarise(
+      Metodos = paste(sort(unique(Metodo)), collapse = " + "),
+      Pontos = paste(sort(unique(Ponto)), collapse = ", "),
+      .groups = "drop"
+    ) %>%
+    dplyr::arrange(Taxon)
+}
+
+run_ecological_analysis <- function(input_path, config_path = NULL, reference_path = NULL, output_dir) {
+  eco_config <- load_eco_config(config_path)$ecologia
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+  cat("\n[1/6] Lendo CSV curado e preparando a tabela de trabalho...\n")
+  df_raw <- read_curated_csv(input_path)
+  check_ecology_columns(df_raw, eco_config)
+  df <- prepare_ecology_table(df_raw, eco_config)
+
+  group_col <- eco_config$coluna_grupo
+  id_col <- eco_config$coluna_id
+  group_wide <- build_group_taxon_matrix(df, group_col, id_col, eco_config$coluna_abundancia)
+  cat(sprintf("Matriz %s x %s: %d %s(s), %d taxa distintos.\n", group_col, id_col, nrow(group_wide), group_col, ncol(group_wide) - 1))
+
+  cat("\n[2/6] Diversidade alfa (riqueza, Shannon, Simpson)...\n")
+  alpha <- compute_alpha_diversity(group_wide, group_col)
+  readr::write_csv2(alpha, file.path(output_dir, "diversidade_alfa.csv"))
+  ggplot2::ggsave(file.path(output_dir, "diversidade_alfa.png"), plot_alpha_diversity(alpha, group_col), width = 20, height = 12, units = "cm", dpi = 150)
+
+  cat("\n[3/6] Curva de acumulacao (esforco amostral)...\n")
+  curva <- compute_accumulation_curve(df, eco_config)
+  if (!is.null(curva$geral)) readr::write_csv2(curva$geral, file.path(output_dir, "curva_acumulacao_geral.csv"))
+  if (!is.null(curva$por_grupo)) {
+    readr::write_csv2(curva$por_grupo, file.path(output_dir, "curva_acumulacao_por_grupo.csv"))
+    ggplot2::ggsave(file.path(output_dir, "curva_acumulacao.png"), plot_accumulation_curve(curva$por_grupo, group_col), width = 20, height = 12, units = "cm", dpi = 150)
+  }
+
+  cat("\n[4/6] Dissimilaridade entre pontos (beta diversidade)...\n")
+  beta <- compute_beta_dissimilarity(group_wide, eco_config$metodo_dissimilaridade)
+  if (!is.null(beta)) {
+    dist_df <- as.data.frame(as.matrix(beta$dist))
+    dist_df <- tibble::rownames_to_column(dist_df, group_col)
+    readr::write_csv2(dist_df, file.path(output_dir, "dissimilaridade.csv"))
+    save_dendrogram_plot(beta, file.path(output_dir, "dissimilaridade_dendrograma.png"), group_col)
+  }
+
+  cat("\n[5/6] Composicao taxonomica e taxa exclusivos/compartilhados...\n")
+  composicao <- compute_taxonomic_composition(df, eco_config)
+  if (!is.null(composicao)) {
+    readr::write_csv2(composicao, file.path(output_dir, "composicao_taxonomica.csv"))
+    ggplot2::ggsave(file.path(output_dir, "composicao_taxonomica.png"), plot_taxonomic_composition(composicao, eco_config), width = 22, height = 14, units = "cm", dpi = 150)
+  }
+  exclusivos <- compute_shared_exclusive_taxa(group_wide, group_col)
+  readr::write_csv2(exclusivos, file.path(output_dir, "taxa_exclusivos_compartilhados.csv"))
+
+  metadata_breakdown <- compute_metadata_breakdown(df, eco_config)
+  for (meta_col in names(metadata_breakdown)) {
+    readr::write_csv2(metadata_breakdown[[meta_col]], file.path(output_dir, sprintf("diversidade_alfa_por_%s.csv", meta_col)))
+  }
+
+  cat("\n[6/6] Comparacao eDNA x metodos tradicionais...\n")
+  comparacao <- NULL
+  if (!is.null(reference_path)) {
+    traditional_df <- read_traditional_species(reference_path)
+    comparacao <- compare_edna_traditional(df, traditional_df, eco_config)
+    readr::write_csv2(comparacao, file.path(output_dir, "comparacao_edna_tradicional.csv"))
+  } else {
+    message("Sem --reference -- comparacao eDNA x metodos tradicionais pulada.")
+  }
+
+  cat(sprintf("\nAnalise ecologica concluida. Saidas em: %s\n", output_dir))
+  invisible(list(
+    alpha = alpha, curva = curva, beta = beta, composicao = composicao,
+    exclusivos = exclusivos, metadata_breakdown = metadata_breakdown, comparacao = comparacao
+  ))
+}
+
+parse_eco_cli_args <- function(args) {
+  config_path <- NULL
+  reference_path <- NULL
+  output_dir <- NULL
+  positional <- character(0)
+
+  for (a in args) {
+    if (startsWith(a, "--config=")) {
+      config_path <- sub("^--config=", "", a)
+    } else if (startsWith(a, "--reference=")) {
+      reference_path <- sub("^--reference=", "", a)
+    } else if (startsWith(a, "--output-dir=")) {
+      output_dir <- sub("^--output-dir=", "", a)
+    } else {
+      positional <- c(positional, a)
+    }
+  }
+
+  if (length(positional) < 1) {
+    stop(
+      "Uso: Rscript analise_ecologica.R <curado.csv> [--config=config.yaml] [--reference=tradicional.csv] [--output-dir=runs/AAAA-MM-DDThh-mm-ss_ecologia]",
+      call. = FALSE
+    )
+  }
+
+  if (is.null(output_dir)) {
+    output_dir <- file.path("runs", paste0(format(Sys.time(), "%Y-%m-%dT%H-%M-%S"), "_ecologia"))
+  }
+
+  list(input = positional[1], config = config_path, reference = reference_path, output_dir = output_dir)
+}
+
+main <- function(args) {
+  parsed <- parse_eco_cli_args(args)
+  run_ecological_analysis(parsed$input, config_path = parsed$config, reference_path = parsed$reference, output_dir = parsed$output_dir)
+}
+
+if (!interactive()) {
+  main(commandArgs(trailingOnly = TRUE))
+}
