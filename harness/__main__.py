@@ -198,8 +198,12 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"\nSucesso. Saida em: {result.output_path}")
 
-    if result.checkpoint_path:
-        print(f"Checkpoint (metricas antes da curadoria assistida): {result.checkpoint_path}")
+    if result.checkpoint_pre_llm:
+        print(
+            "Checkpoint pre-LLM: "
+            f"{result.checkpoint_pre_llm.get('needs_review_count')} sequencia(s) precisariam de revisao "
+            f"({result.checkpoint_pre_llm.get('decision')})."
+        )
 
     if result.llm_mode == "off" and result.llm_skipped_reason:
         print(f"Curadoria assistida por LLM pulada: {result.llm_skipped_reason}")

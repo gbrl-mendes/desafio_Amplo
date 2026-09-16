@@ -20,13 +20,20 @@ Divisao de responsabilidades (nenhuma logica de curadoria mora aqui):
                                    um log estruturado de cada run.
 
 Fluxo: resumo da entrada -> valida -> (recusa se bloqueante) -> roda o R
-(saida ao vivo) -> verifica a saida -> checkpoint (metricas + log proprio +
-pergunta se ha custo real de LLM em jogo) -> curadoria assistida por LLM
-(opcional) -> relatorio narrativo (opcional) -> loga. Cada etapa gera um
-"RunResult" serializavel, gravado em `runs/<timestamp>.json` (checkpoint em
-`runs/<timestamp>_checkpoint.json`, relatorio em
-`runs/<timestamp>_relatorio.pdf`), para responder depois "o que foi feito e
-por que" sem precisar reexecutar nada.
+(saida ao vivo) -> verifica a saida -> checkpoint (metricas + pergunta se ha
+custo real de LLM em jogo) -> curadoria assistida por LLM (opcional) ->
+relatorio narrativo (opcional) -> loga. Cada etapa gera um "RunResult"
+serializavel, gravado num unico `runs/<run_id>.json` por execucao (`run_id`
+curto, ex. `20260916-004104` -- ver `_make_run_id`). Esse arquivo e gravado
+duas vezes numa execucao bem-sucedida: uma vez em
+`status="aguardando_confirmacao_llm"`, logo apos ler o diagnostico do R e
+antes de perguntar se vale a pena prosseguir pra curadoria assistida (assim
+sobra um registro em disco do que foi decidido ate ali mesmo se o processo
+travar ou for encerrado no meio de uma etapa longa e sujeita a rate limit),
+e de novo no final com o conteudo completo -- sem precisar de arquivos
+`_checkpoint.json`/`_diagnostics.json` separados, cujo conteudo se
+sobrepunha bastante ao do log principal. Relatorio narrativo em
+`runs/<run_id>_relatorio.pdf`.
 """
 
 from __future__ import annotations
@@ -102,15 +109,22 @@ class RunResult:
     report_path: Optional[str] = None
     report_mode: Optional[str] = None
     report_error: Optional[str] = None
-    checkpoint_path: Optional[str] = None
     ecologia_output_dir: Optional[str] = None
     ecologia_exit_code: Optional[int] = None
     ecologia_error: Optional[str] = None
     tipo_execucao: str = "completo"  # "completo" | "ecologia_somente"
     config_path: Optional[str] = None
     reference_path: Optional[str] = None
-    diagnostics_path: Optional[str] = None
     html_report_path: Optional[str] = None
+    # Diagnosticos estruturados por etapa do determinístico (lidos do arquivo
+    # que o R escreve como ponte entre os dois processos, depois apagado --
+    # ver `run()`) e as informacoes do checkpoint pre-LLM, ambos aninhados
+    # aqui em vez de virarem arquivos `_diagnostics.json`/`_checkpoint.json`
+    # separados: o conteudo se sobrepunha bastante (ver discussao na sessao
+    # que motivou essa mudanca) e o desafio pede so "registros que permitam
+    # revisar o percurso", nao um arquivo por etapa.
+    diagnosticos: Optional[dict] = None
+    checkpoint_pre_llm: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -270,12 +284,27 @@ def verify_output(output_path: Path, expected_row_count: int) -> list[str]:
     return issues
 
 
-def write_run_log(result: RunResult, runs_dir: Path) -> Path:
+def write_run_log(result: RunResult, runs_dir: Path, run_id: str) -> Path:
+    """Grava (ou sobrescreve) `runs/<run_id>.json`. Chamada mais de uma vez
+    pro mesmo `run_id` durante uma execucao bem-sucedida (ver `run()`): uma
+    vez em `status="aguardando_confirmacao_llm"`, com o que ja se sabe antes
+    de perguntar sobre a curadoria assistida, e de novo no final com o
+    conteudo completo -- assim ainda sobra um registro em disco do que foi
+    decidido ate ali se o processo travar ou for encerrado no meio, sem
+    precisar de um segundo arquivo so pra isso."""
     runs_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = result.started_at.replace(":", "-").replace("+00-00", "Z")
-    log_path = runs_dir / f"{timestamp}.json"
+    log_path = runs_dir / f"{run_id}.json"
     log_path.write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
     return log_path
+
+
+def _make_run_id(moment: datetime) -> str:
+    """Nome de arquivo curto e ordenavel cronologicamente pra uma execucao,
+    ex. `20260916-004104` -- mesma informacao de `started_at` (data e hora
+    ate o segundo), sem os dois-pontos/microsegundos que tornavam o nome
+    completo do ISO 8601 (`2026-09-16T00-41-04.374408Z`) desnecessariamente
+    longo pra um nome de arquivo."""
+    return moment.strftime("%Y%m%d-%H%M%S")
 
 
 def run(
@@ -349,7 +378,9 @@ def run(
     input_csv = Path(input_csv)
     config_path = Path(config_path) if config_path else None
     runs_dir = Path(runs_dir)
-    started_at = datetime.now(timezone.utc).isoformat()
+    _now = datetime.now(timezone.utc)
+    started_at = _now.isoformat()
+    run_id = _make_run_id(_now)
 
     df = pd.read_csv(input_csv, sep=";", decimal=",", encoding="utf-8")
     print(format_input_summary(df, str(traditional_species_csv) if traditional_species_csv else None))
@@ -370,7 +401,7 @@ def run(
             validation_blocking=[f"{i.code}: {i.message}" for i in report.blocking],
             validation_warnings=[f"{i.code}: {i.message}" for i in report.warnings],
         )
-        write_run_log(result, runs_dir)
+        write_run_log(result, runs_dir, run_id)
         return result
 
     if output_csv is None:
@@ -394,7 +425,7 @@ def run(
                 "Instale R (https://www.r-project.org) ou aponte para o executavel."
             ),
         )
-        write_run_log(result, runs_dir)
+        write_run_log(result, runs_dir, run_id)
         return result
 
     print("\n=== Rodando curadoria deterministica (R) ===")
@@ -411,7 +442,7 @@ def run(
             validation_warnings=[f"{i.code}: {i.message}" for i in report.warnings],
             error=f"Execucao do R excedeu o timeout de {timeout}s.",
         )
-        write_run_log(result, runs_dir)
+        write_run_log(result, runs_dir, run_id)
         return result
 
     verification_issues: list[str] = []
@@ -420,16 +451,11 @@ def run(
 
     status = "success" if proc.returncode == 0 and not verification_issues else "failed"
 
-    # Mesma convencao de nome usada por curadoria_deterministica.qmd::main()
-    # pra gravar o diagnostics.json (ver C1) -- ao lado do CSV de saida,
-    # trocando so a extensao. So existe de fato se o R realmente escreveu.
-    diagnostics_candidate = Path(str(output_csv).rsplit(".csv", 1)[0] + "_diagnostics.json")
-    diagnostics_path = str(diagnostics_candidate) if status == "success" and diagnostics_candidate.exists() else None
-
     llm_result = None
     curated_df = None
     deterministic_df = None
-    checkpoint_path = None
+    diagnosticos = None
+    checkpoint_pre_llm = None
     effective_llm_mode = llm_mode
     if status == "success":
         try:
@@ -444,12 +470,54 @@ def run(
             # mostra como "saida do determinístico antes da LLM".
             deterministic_df = curated_df.copy()
 
-            # Checkpoint: mostra o que a curadoria deterministica encontrou,
-            # grava um log proprio desse trecho, e (so quando --llm-mode=live
-            # e ha custo/tempo real de API em jogo) pergunta se vale a pena
-            # seguir pra curadoria assistida.
+            # Diagnosticos estruturados que o R escreveu (ver
+            # curadoria_deterministica.qmd, bloco C1) -- mesma convencao de
+            # nome de curadoria_deterministica.qmd::main(), ao lado do CSV
+            # de saida, trocando so a extensao. Essa leitura e so a ponte
+            # entre os dois processos (fronteira de subprocess); uma vez
+            # absorvido em memoria, o arquivo intermediario e apagado --
+            # deixa de existir como artefato final, tudo fica dentro do log
+            # unico desta execucao (`diagnosticos`, mais adiante).
+            diagnostics_bridge = Path(str(output_csv).rsplit(".csv", 1)[0] + "_diagnostics.json")
+            if diagnostics_bridge.exists():
+                diagnosticos = json.loads(diagnostics_bridge.read_text(encoding="utf-8"))
+                diagnostics_bridge.unlink()
+
+            # Checkpoint: mostra o que a curadoria deterministica encontrou e
+            # (so quando --llm-mode=live e ha custo/tempo real de API em
+            # jogo) pergunta se vale a pena seguir pra curadoria assistida.
             checkpoint_stats = build_checkpoint_stats(curated_df)
             print("\n" + format_checkpoint_summary(checkpoint_stats))
+
+            checkpoint_pre_llm = {
+                "needs_review_count": checkpoint_stats["needs_review_count"],
+                "llm_mode_requested": llm_mode,
+            }
+
+            # Retrato parcial do log gravado AQUI, antes de perguntar se
+            # prossegue -- se o processo travar ou for encerrado logo depois
+            # da confirmacao (etapa longa e sujeita a rate limit da Groq),
+            # ainda sobra em runs/<run_id>.json o que ja se sabia ate este
+            # ponto, sem precisar de um arquivo de checkpoint separado. O
+            # mesmo arquivo e sobrescrito com o conteudo completo no final.
+            write_run_log(
+                RunResult(
+                    status="aguardando_confirmacao_llm",
+                    input_path=str(input_csv),
+                    output_path=str(output_csv),
+                    started_at=started_at,
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    validation_summary=report.summary(),
+                    validation_warnings=[f"{i.code}: {i.message}" for i in report.warnings],
+                    r_exit_code=proc.returncode,
+                    diagnosticos=diagnosticos,
+                    checkpoint_pre_llm=checkpoint_pre_llm,
+                    config_path=str(config_path) if config_path else None,
+                    reference_path=str(traditional_species_csv) if traditional_species_csv else None,
+                ),
+                runs_dir,
+                run_id,
+            )
 
             checkpoint_decision = "llm-mode != live: checkpoint nao pergunta, so registra"
             if llm_mode == "live":
@@ -465,23 +533,8 @@ def run(
                     if not proceed:
                         effective_llm_mode = "off"
 
-            checkpoint_timestamp = started_at.replace(":", "-").replace("+00-00", "Z")
-            checkpoint_file = runs_dir / f"{checkpoint_timestamp}_checkpoint.json"
-            checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
-            checkpoint_file.write_text(
-                json.dumps(
-                    {
-                        **checkpoint_stats,
-                        "llm_mode_requested": llm_mode,
-                        "llm_mode_effective": effective_llm_mode,
-                        "decision": checkpoint_decision,
-                    },
-                    indent=2,
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
-            )
-            checkpoint_path = str(checkpoint_file)
+            checkpoint_pre_llm["llm_mode_effective"] = effective_llm_mode
+            checkpoint_pre_llm["decision"] = checkpoint_decision
 
             if effective_llm_mode != llm_mode:
                 print(f"\n=== Curadoria assistida por LLM pulada no checkpoint ({checkpoint_decision}) ===")
@@ -535,8 +588,7 @@ def run(
 
     report_path = None
     if report_text is not None:
-        timestamp = started_at.replace(":", "-").replace("+00-00", "Z")
-        report_file = runs_dir / f"{timestamp}_relatorio.pdf"
+        report_file = runs_dir / f"{run_id}_relatorio.pdf"
         report_file.parent.mkdir(parents=True, exist_ok=True)
         try:
             subtitle_parts = [
@@ -568,8 +620,7 @@ def run(
             ecologia_error = "Rscript nao encontrado -- analise ecologica pulada."
         else:
             try:
-                eco_timestamp = started_at.replace(":", "-").replace("+00-00", "Z")
-                eco_dir = runs_dir / f"{eco_timestamp}_ecologia"
+                eco_dir = runs_dir / f"{run_id}_ecologia"
                 print("\n=== Analise ecologica ===")
                 eco_proc = eco_runner(
                     eco_resolved_rscript,
@@ -600,7 +651,7 @@ def run(
                 "project": _first_value(df, "Project"),
                 "primer": _first_value(df, "Primer"),
                 "input_df": df,
-                "diagnostics": json.loads(Path(diagnostics_path).read_text(encoding="utf-8")) if diagnostics_path else None,
+                "diagnostics": diagnosticos,
                 "deterministic_df": deterministic_df,
                 "report_text": report_text,
                 "llm_divergence_examples": report_stats.get("llm_divergence_examples") if report_stats else [],
@@ -611,8 +662,7 @@ def run(
                 "ecologia_requested": True,
             }
             html_text = build_html_report(html_context)
-            html_timestamp = started_at.replace(":", "-").replace("+00-00", "Z")
-            html_file = runs_dir / f"{html_timestamp}_report.html"
+            html_file = runs_dir / f"{run_id}_report.html"
             html_file.write_text(html_text, encoding="utf-8")
             html_report_path = str(html_file)
         except Exception:
@@ -640,16 +690,16 @@ def run(
         report_path=report_path,
         report_mode=report_result.mode if report_result else None,
         report_error=report_result.error if report_result else None,
-        checkpoint_path=checkpoint_path,
         ecologia_output_dir=ecologia_output_dir,
         ecologia_exit_code=ecologia_exit_code,
         ecologia_error=ecologia_error,
         config_path=str(config_path) if config_path else None,
         reference_path=str(traditional_species_csv) if traditional_species_csv else None,
-        diagnostics_path=diagnostics_path,
         html_report_path=html_report_path,
+        diagnosticos=diagnosticos,
+        checkpoint_pre_llm=checkpoint_pre_llm,
     )
-    write_run_log(result, runs_dir)
+    write_run_log(result, runs_dir, run_id)
     return result
 
 
@@ -708,7 +758,9 @@ def run_ecologia_somente(
     config_path = Path(config_path) if config_path else None
     reference_path = Path(reference_path) if reference_path else None
     runs_dir = Path(runs_dir)
-    started_at = datetime.now(timezone.utc).isoformat()
+    _now = datetime.now(timezone.utc)
+    started_at = _now.isoformat()
+    run_id = _make_run_id(_now)
 
     def _refused(reason: str) -> RunResult:
         result = RunResult(
@@ -722,7 +774,7 @@ def run_ecologia_somente(
             config_path=str(config_path) if config_path else None,
             reference_path=str(reference_path) if reference_path else None,
         )
-        write_run_log(result, runs_dir)
+        write_run_log(result, runs_dir, run_id)
         return result
 
     def _failed(error: str, **extra) -> RunResult:
@@ -739,7 +791,7 @@ def run_ecologia_somente(
             reference_path=str(reference_path) if reference_path else None,
             **extra,
         )
-        write_run_log(result, runs_dir)
+        write_run_log(result, runs_dir, run_id)
         return result
 
     eco_columns = _load_eco_config_columns(config_path)
@@ -782,8 +834,7 @@ def run_ecologia_somente(
             "Instale R (https://www.r-project.org) ou aponte para o executavel."
         )
 
-    eco_timestamp = started_at.replace(":", "-").replace("+00-00", "Z")
-    eco_dir = runs_dir / f"{eco_timestamp}_ecologia"
+    eco_dir = runs_dir / f"{run_id}_ecologia"
     print("\n=== Analise ecologica (--ecologia-somente) ===")
     try:
         eco_proc = eco_runner(resolved_rscript, curado_csv_path, eco_dir, config_path, reference_path, timeout)
@@ -809,7 +860,7 @@ def run_ecologia_somente(
                 "ecologia_requested": True,
             }
             html_text = build_html_report(html_context)
-            html_file = runs_dir / f"{eco_timestamp}_report.html"
+            html_file = runs_dir / f"{run_id}_report.html"
             html_file.write_text(html_text, encoding="utf-8")
             html_report_path = str(html_file)
         except Exception:
@@ -836,5 +887,5 @@ def run_ecologia_somente(
         ecologia_error=eco_error,
         html_report_path=html_report_path,
     )
-    write_run_log(result, runs_dir)
+    write_run_log(result, runs_dir, run_id)
     return result

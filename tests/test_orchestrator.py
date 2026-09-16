@@ -178,6 +178,89 @@ def _fake_success_runner_with_evidence(rscript_exe, input_csv, output_csv, confi
     return subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
 
 
+def _fake_success_runner_with_diagnostics(rscript_exe, input_csv, output_csv, config_path, timeout):
+    """Como `_fake_success_runner_with_evidence`, mas tambem escreve um
+    `_diagnostics.json` ao lado da saida -- imita o que
+    `curadoria_deterministica.qmd` realmente grava (ver C1), pra testar que
+    `run()` absorve esse conteudo em `diagnosticos` e apaga o arquivo ponte."""
+    result = _fake_success_runner_with_evidence(rscript_exe, input_csv, output_csv, config_path, timeout)
+    diagnostics_path = Path(str(output_csv).rsplit(".csv", 1)[0] + "_diagnostics.json")
+    diagnostics_path.write_text(
+        json.dumps({"refinamento_hits": {"selected_hit_origin": "1: 3", "total_linhas": 3}}), encoding="utf-8"
+    )
+    return result
+
+
+def test_diagnostics_bridge_file_absorbed_and_deleted(tmp_path):
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner_with_diagnostics,
+        rscript_exe="rscript-fake",
+        llm_mode="off",
+    )
+
+    assert result.status == "success"
+    assert result.diagnosticos == {"refinamento_hits": {"selected_hit_origin": "1: 3", "total_linhas": 3}}
+    # O arquivo _diagnostics.json era so a ponte entre R e Python -- depois
+    # de absorvido em memoria, nao deve sobrar em disco.
+    output_dir = Path(result.output_path).parent
+    assert not list(output_dir.glob("*_diagnostics.json"))
+
+
+def test_run_id_is_short_and_sortable(tmp_path):
+    import re
+
+    runs_dir = tmp_path / "runs"
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=runs_dir,
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="off",
+    )
+
+    assert result.status == "success"
+    log_files = list(runs_dir.glob("*.json"))
+    assert len(log_files) == 1  # um so arquivo de log por execucao, nao mais checkpoint/diagnostics separados
+    assert re.fullmatch(r"\d{8}-\d{6}\.json", log_files[0].name)
+
+
+def test_run_log_written_progressively_before_and_after_llm_confirmation(tmp_path):
+    seen_statuses = []
+
+    def _fake_confirm(prompt_text):
+        # No momento em que o usuario e perguntado, o log parcial ja deve
+        # estar em disco com status "aguardando_confirmacao_llm".
+        runs_dir = tmp_path / "runs"
+        log_files = list(runs_dir.glob("*.json"))
+        assert len(log_files) == 1
+        partial = json.loads(log_files[0].read_text(encoding="utf-8"))
+        seen_statuses.append(partial["status"])
+        assert partial["checkpoint_pre_llm"]["llm_mode_requested"] == "live"
+        assert "decision" not in partial["checkpoint_pre_llm"]
+        assert partial["diagnosticos"] is None or isinstance(partial["diagnosticos"], dict)
+        return True, "usuario confirmou (teste)"
+
+    result = run(
+        _write_valid_input(tmp_path),
+        runs_dir=tmp_path / "runs",
+        r_runner=_fake_success_runner_with_evidence,
+        rscript_exe="rscript-fake",
+        llm_mode="live",
+        confirm_llm_stage=_fake_confirm,
+    )
+
+    assert seen_statuses == ["aguardando_confirmacao_llm"]
+    assert result.status == "success"  # sobrescrito no final, no mesmo arquivo
+    runs_dir = tmp_path / "runs"
+    log_files = list(runs_dir.glob("*.json"))
+    assert len(log_files) == 1
+    final = json.loads(log_files[0].read_text(encoding="utf-8"))
+    assert final["status"] == "success"
+    assert final["checkpoint_pre_llm"]["decision"] == "usuario confirmou (teste)"
+
+
 def test_success_writes_report_alongside_json_log_in_mock_mode(tmp_path):
     df = _valid_input_df()
     input_csv = tmp_path / "entrada.csv"
@@ -206,7 +289,7 @@ def test_success_writes_report_alongside_json_log_in_mock_mode(tmp_path):
     assert report_file.read_bytes().startswith(b"%PDF")
 
 
-def test_checkpoint_writes_own_log_regardless_of_llm_mode(tmp_path):
+def test_checkpoint_data_nested_in_single_run_log_regardless_of_llm_mode(tmp_path):
     df = _valid_input_df()
     input_csv = tmp_path / "entrada.csv"
     _write_input_csv(input_csv, df)
@@ -221,11 +304,14 @@ def test_checkpoint_writes_own_log_regardless_of_llm_mode(tmp_path):
     )
 
     assert result.status == "success"
-    assert result.checkpoint_path is not None
-    checkpoint_data = json.loads(Path(result.checkpoint_path).read_text(encoding="utf-8"))
-    assert checkpoint_data["llm_mode_requested"] == "off"
-    assert checkpoint_data["llm_mode_effective"] == "off"
-    assert "unique_asv_count" in checkpoint_data
+    # Nao existe mais um arquivo _checkpoint.json separado -- os dados do
+    # checkpoint (so o que e unico, needs_review_count/llm_mode/decision)
+    # ficam aninhados dentro do log unico desta execucao.
+    assert result.checkpoint_pre_llm is not None
+    assert result.checkpoint_pre_llm["llm_mode_requested"] == "off"
+    assert result.checkpoint_pre_llm["llm_mode_effective"] == "off"
+    assert "needs_review_count" in result.checkpoint_pre_llm
+    assert not list((runs_dir).glob("*_checkpoint.json"))
 
 
 def test_checkpoint_does_not_prompt_when_llm_mode_is_not_live(tmp_path):
@@ -263,10 +349,9 @@ def test_checkpoint_prompts_and_downgrades_to_off_when_declined(tmp_path):
 
     assert result.status == "success"
     assert result.llm_mode == "off"
-    checkpoint_data = json.loads(Path(result.checkpoint_path).read_text(encoding="utf-8"))
-    assert checkpoint_data["llm_mode_requested"] == "live"
-    assert checkpoint_data["llm_mode_effective"] == "off"
-    assert "pular" in checkpoint_data["decision"]
+    assert result.checkpoint_pre_llm["llm_mode_requested"] == "live"
+    assert result.checkpoint_pre_llm["llm_mode_effective"] == "off"
+    assert "pular" in result.checkpoint_pre_llm["decision"]
 
 
 def test_checkpoint_prompts_and_proceeds_when_confirmed(tmp_path):

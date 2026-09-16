@@ -59,10 +59,13 @@ Os blocos estão organizados assim:
 
 ### Localização do repositório
 
-- **Resolver a raiz do repo e fixar o diretório de trabalho.** Funciona via `Rscript` ou de dentro do RStudio/Positron, e fixa `setwd(REPO_ROOT)` para que caminhos relativos (`data/example/...`) resolvam de forma consistente.
+- **Resolver a raiz do repo e fixar o diretório de trabalho.** Funciona via `Rscript` ou de dentro do RStudio/Positron, e fixa `setwd(REPO_ROOT)` para que caminhos relativos (`data/example/...`) resolvam de forma consistente. Com `CURADORIA_TESTING=true` (source() a partir de `r/tests/testthat`), usa um marcador de arquivo em vez de `commandArgs()`, já que nesse caso o `--file=` da linha de comando aponta pro test runner, não pra este arquivo, e o working directory já pode ter sido alterado pelo testthat antes de chegar aqui.
 
   ```{r}
   get_repo_root <- function() {
+    if (identical(Sys.getenv("CURADORIA_TESTING"), "true")) {
+      return(rprojroot::find_root(rprojroot::has_file("DOMINIO_E_CONTRATO.md")))
+    }
     cli_args <- commandArgs(trailingOnly = FALSE)
     file_arg <- grep("^--file=", cli_args, value = TRUE)
     if (length(file_arg) > 0) {
@@ -1117,25 +1120,49 @@ A área consultada no GBIF é calculada a partir dos próprios pontos amostrados
   }
   ```
 
-- **Contar registros regionais no GBIF.** Conta registros do GBIF pra um nome científico dentro da área declarada. `NA` (não `0`) se a consulta falhar, não confundir "sem registro" com "não consultou" (rede indisponível, nome não resolvido no GBIF etc.).
+- **Contar registros regionais no GBIF.** Conta registros do GBIF pra um nome científico dentro da área declarada, via `rgbif::occ_count()` (wrapper leve de `occ_search(limit=0)$meta$count`, que aceita `geometry=` na versão instalada). `NA` (não `0`) se a consulta falhar, não confundir "sem registro" com "não consultou" (rede indisponível, nome não resolvido no GBIF etc.). Uma pausa de 0.3s depois de cada chamada evita disparar o limite de taxa da API pública do GBIF, mesmo padrão já usado na consulta de taxonomia do NCBI (`retrieve_taxonomy`); se mesmo assim vier "Too many requests", tenta de novo até `max_retries` vezes com espera exponencial (mesmo padrão do retry da Groq em `llm_curation.py::call_groq`) antes de desistir. Erros de outro tipo (nome não resolvido, rede indisponível) não são transitórios e vão direto pra `NA_integer_`.
 
   ```{r}
-  gbif_regional_count <- function(scientific_name, wkt, verbose = TRUE) {
+  gbif_regional_count <- function(scientific_name, wkt, verbose = TRUE, max_retries = 4) {
     if (is.na(scientific_name) || !nzchar(scientific_name)) return(NA_integer_)
     if (verbose) message(sprintf("GBIF: %s", scientific_name))
-    tryCatch(
-      {
-        res <- rgbif::occ_search(scientificName = scientific_name, geometry = wkt, limit = 1)
-        as.integer(res$meta$count)
-      },
-      error = function(e) {
+
+    for (attempt in seq_len(max_retries)) {
+      result <- tryCatch(
+        as.integer(rgbif::occ_count(scientificName = scientific_name, geometry = wkt)),
+        error = function(e) e
+      )
+      # Throttle entre chamadas consecutivas ao GBIF, mesmo padrao usado na
+      # consulta de taxonomia do NCBI (retrieve_taxonomy).
+      Sys.sleep(0.3)
+
+      if (!inherits(result, "error")) return(result)
+
+      rate_limited <- grepl("too many requests", conditionMessage(result), ignore.case = TRUE)
+      if (!rate_limited) {
         warning(
-          sprintf("Falha na consulta GBIF para '%s': %s", scientific_name, conditionMessage(e)),
+          sprintf("Falha na consulta GBIF para '%s': %s", scientific_name, conditionMessage(result)),
           call. = FALSE
         )
-        NA_integer_
+        return(NA_integer_)
       }
+
+      if (attempt < max_retries) {
+        if (verbose) {
+          message(sprintf("GBIF: limite de taxa (tentativa %d/%d), aguardando...", attempt, max_retries))
+        }
+        Sys.sleep(2^attempt)
+      }
+    }
+
+    warning(
+      sprintf(
+        "Falha na consulta GBIF para '%s': limite de taxa persistente apos %d tentativas",
+        scientific_name, max_retries
+      ),
+      call. = FALSE
     )
+    NA_integer_
   }
   ```
 
@@ -1359,10 +1386,10 @@ O CSV exportado é reordenado e filtrado para compatibilidade com o formato "lon
   }
   ```
 
-- **Ponto de entrada.** O `if (!interactive())` impede que `main()` rode sozinho quando o documento é aberto interativamente (RStudio/Positron); nesse modo, as funções acima ficam disponíveis para chamar uma a uma e inspecionar o resultado. Quando o script/documento é executado via `Rscript`, `main()` roda com os argumentos passados na linha de comando.
+- **Ponto de entrada.** O `if (!interactive())` impede que `main()` rode sozinho quando o documento é aberto interativamente (RStudio/Positron); nesse modo, as funções acima ficam disponíveis para chamar uma a uma e inspecionar o resultado. Quando o script/documento é executado via `Rscript`, `main()` roda com os argumentos passados na linha de comando. A variável de ambiente `CURADORIA_TESTING=true` é a exceção: permite que os testes (`r/tests/testthat`) façam `source()` deste arquivo só para reusar as definições de função, sem disparar `main()`.
 
   ```{r}
-  if (!interactive()) {
+  if (!interactive() && !identical(Sys.getenv("CURADORIA_TESTING"), "true")) {
     main(commandArgs(trailingOnly = TRUE))
   }
   ```

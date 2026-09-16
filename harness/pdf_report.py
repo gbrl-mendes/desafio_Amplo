@@ -185,6 +185,13 @@ def markdown_to_pdf_bytes(markdown_text: str, title: str, subtitle: str | None =
             "--disable-gpu",
             "--no-sandbox",
             "--virtual-time-budget=4000",  # da tempo da fonte do Google Fonts carregar antes de imprimir
+            # Perfil isolado, so pra esta chamada: sem isso, se o Edge ja tiver
+            # uma sessao rodando em segundo plano (comportamento padrao do
+            # Windows -- "continuar executando apps em segundo plano"), esta
+            # invocacao so repassa os argumentos pra sessao existente e
+            # termina de imediato (exit code 0), sem imprimir nada, porque
+            # essa sessao ja aberta nao esta em modo headless.
+            f"--user-data-dir={Path(tmp_dir) / 'profile'}",
             f"--print-to-pdf={pdf_path}",
             html_path.as_uri(),
         ]

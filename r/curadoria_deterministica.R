@@ -21,6 +21,16 @@ suppressPackageStartupMessages({
 })
 
 get_repo_root <- function() {
+  # CURADORIA_TESTING=true: este arquivo esta sendo source()ado de dentro de
+  # um test runner (r/tests/testthat), nao rodado diretamente via Rscript --
+  # o `--file=` de commandArgs() apontaria pro script do test runner, nao pra
+  # este arquivo, e o working directory ja pode ter sido alterado pelo
+  # testthat antes de chegar aqui. Detectar a raiz do repo por um marcador de
+  # arquivo em vez de tentar reconstruir o caminho a partir da linha de
+  # comando evita essa confusao.
+  if (identical(Sys.getenv("CURADORIA_TESTING"), "true")) {
+    return(rprojroot::find_root(rprojroot::has_file("DOMINIO_E_CONTRATO.md")))
+  }
   cli_args <- commandArgs(trailingOnly = FALSE)
   file_arg <- grep("^--file=", cli_args, value = TRUE)
   if (length(file_arg) > 0) {
@@ -876,22 +886,46 @@ bbox_to_wkt <- function(area_bbox) {
   )
 }
 
-gbif_regional_count <- function(scientific_name, wkt, verbose = TRUE) {
+gbif_regional_count <- function(scientific_name, wkt, verbose = TRUE, max_retries = 4) {
   if (is.na(scientific_name) || !nzchar(scientific_name)) return(NA_integer_)
   if (verbose) message(sprintf("GBIF: %s", scientific_name))
-  tryCatch(
-    {
-      res <- rgbif::occ_search(scientificName = scientific_name, geometry = wkt, limit = 1)
-      as.integer(res$meta$count)
-    },
-    error = function(e) {
+
+  for (attempt in seq_len(max_retries)) {
+    result <- tryCatch(
+      as.integer(rgbif::occ_count(scientificName = scientific_name, geometry = wkt)),
+      error = function(e) e
+    )
+    # Throttle entre chamadas consecutivas ao GBIF, mesmo padrao usado na
+    # consulta de taxonomia do NCBI (retrieve_taxonomy).
+    Sys.sleep(0.3)
+
+    if (!inherits(result, "error")) return(result)
+
+    rate_limited <- grepl("too many requests", conditionMessage(result), ignore.case = TRUE)
+    if (!rate_limited) {
       warning(
-        sprintf("Falha na consulta GBIF para '%s': %s", scientific_name, conditionMessage(e)),
+        sprintf("Falha na consulta GBIF para '%s': %s", scientific_name, conditionMessage(result)),
         call. = FALSE
       )
-      NA_integer_
+      return(NA_integer_)
     }
+
+    if (attempt < max_retries) {
+      if (verbose) {
+        message(sprintf("GBIF: limite de taxa (tentativa %d/%d), aguardando...", attempt, max_retries))
+      }
+      Sys.sleep(2^attempt)
+    }
+  }
+
+  warning(
+    sprintf(
+      "Falha na consulta GBIF para '%s': limite de taxa persistente apos %d tentativas",
+      scientific_name, max_retries
+    ),
+    call. = FALSE
   )
+  NA_integer_
 }
 
 run_regional_check <- function(df, config = DEFAULT_CONFIG) {
@@ -1078,6 +1112,9 @@ main <- function(args) {
   invisible(df)
 }
 
-if (!interactive()) {
+# CURADORIA_TESTING=true permite aos testes (r/tests/testthat) fazer source()
+# deste arquivo so pra reusar as definicoes de funcao, sem disparar main()
+# (que espera <entrada.csv> via linha de comando e daria stop()).
+if (!interactive() && !identical(Sys.getenv("CURADORIA_TESTING"), "true")) {
   main(commandArgs(trailingOnly = TRUE))
 }

@@ -6,7 +6,8 @@ options(repos = c(CRAN = "https://cloud.r-project.org"))
 
 cran_packages <- c(
   "tidyverse", "yaml", "taxize", "ape", "rgbif", "vegan", "jsonlite",
-  "plotly", "htmlwidgets", "ggdendro", "rmarkdown", "pandoc", "gh", "BiocManager"
+  "plotly", "htmlwidgets", "ggdendro", "rmarkdown", "pandoc", "gh", "BiocManager",
+  "testthat"
 )
 to_install <- setdiff(cran_packages, rownames(installed.packages()))
 if (length(to_install) > 0) {
