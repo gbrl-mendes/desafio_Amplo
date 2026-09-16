@@ -15,6 +15,17 @@ Veja [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md) para o problema, o domínio 
 
 ## Instalação
 
+1. **Obtenha o projeto.**
+
+```bash
+git clone https://github.com/gbrl-mendes/desafio_Amplo.git
+cd desafio_Amplo
+```
+
+Sem Git instalado, ou preferindo não instalar: baixe como ZIP pela página do repositório (botão verde **Code** → **Download ZIP**), extraia, e abra um terminal dentro da pasta extraída. Passo a passo completo, com solução de problemas comuns, em [COMO_BAIXAR.md](COMO_BAIXAR.md).
+
+2. **Instale as dependências.**
+
 Um comando só, cria o venv, instala as dependências Python, instala os pacotes R e confere se há um navegador Chromium disponível (necessário pro relatório em PDF) -- idempotente, pode rodar de novo sem problema (ex. depois de um `git pull`):
 
 ```powershell
@@ -29,15 +40,15 @@ bash setup.sh
 
 ## Execução
 
-```bash
-.venv\Scripts\python.exe -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --groq-api-key <chave>
+Depois de instalar, de dentro da pasta `desafio_Amplo`:
+
+```powershell
+.venv\Scripts\python.exe -m harness data/example/exemplo_1/eDNA_cipo_subset_output.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia --groq-api-key <chave>
 ```
 
-Isso roda a curadoria completa sobre o dado de demonstração  e grava tudo em `runs/<run_id>/`: o CSV final, o log da execução, e o relatório narrativo em PDF.
+O comando acima executa a curadoria completa sobre o primeiro conjunto de dados de exemplo (planilha `eDNA_cipo_supset.csv`), usa um dataset de espécies pré-detectadas na área como referência para a curadoria (parâmetro `--reference`, planilha `spp_tradicional.csv`) e por último executa um pequeno conjunto de análises ecológicas a partir dos resultados curados pela LLM (parâmetro `--ecologia`). No final é gerado um relatório em HTML, onde é possível acessar os resultados de cada etapa do processamento. 
 
-Todos os parâmetros (`--config`, `--reference`, `--ecologia`, `--ecologia-somente`, `--llm-mode`, entre outros), mais exemplos com cada um deles, estão em [DOCUMENTATION.md](DOCUMENTATION.md#execução).
-
-Código de saída do processo: `0` sucesso, `2` entrada recusada pela validação, `3` falha na execução.
+Todos os parâmetros (`--config`, `--reference`, `--ecologia`, `--ecologia-somente`, `--llm-mode`, entre outros) e mais exeplos de execução estão detalhados em [DOCUMENTATION.md](DOCUMENTATION.md#execução).
 
 ## Rodando os testes
 
@@ -56,3 +67,5 @@ Rscript r/tests/run_tests.R
 ## Contato
 
 Para mais informações, entre em contato comigo através do meu endereço de [e-mail](mailto:gabrielmendesbrt@outlook.com) 😊
+
+

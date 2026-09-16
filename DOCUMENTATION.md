@@ -14,7 +14,7 @@ Para instalar e rodar o exemplo básico, veja o [README](README.md). Este docume
 | [`harness/orchestrator.py`](harness/orchestrator.py)               | Integração de todas as etapas: validação da entrada, execução do pipeline em R, verificação do output do R, chamada da curadoria assistida por LLM, geração do relatório narrativo, análise ecológica opcional, geração do relatório HTML único, e gravação do log em JSON de cada execução.                                                                                                                                                                                                                     |
 | [`harness/llm_curation.py`](harness/llm_curation.py)               | Curadoria assistida por LLM, via Groq.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | [`harness/report_generation.py`](harness/report_generation.py)     | Relatório narrativo da execução em markdown, também via Groq, a partir dos agregados gerados nas etapas anteriores.                                                                                                                                                                                                                                                                                                                                                                                              |
-| [`harness/pdf_report.py`](harness/pdf_report.py)                   | Renderiza o markdown de `report_generation.py` como PDF (tema Cayman), a entrega final gravada em `runs/<run_id>/<run_id>_relatorio.pdf`.                                                                                                                                                                                                                                                                                                                                                                                 |
+| [`harness/pdf_report.py`](harness/pdf_report.py)                   | Renderiza o markdown de `report_generation.py` como PDF (tema Cayman), a entrega final gravada em `runs/<run_id>/<run_id>_relatorio.pdf`.                                                                                                                                                                                                                                                                                                                                                                        |
 | [`harness/html_report.py`](harness/html_report.py)                 | Relatório HTML único por execução (ver "Relatório HTML" abaixo), gerado só quando a análise ecológica roda.                                                                                                                                                                                                                                                                                                                                                                                                      |
 | [`harness/__main__.py`](harness/__main__.py)                       | Ponto de entrada da linha de comando (`python -m harness`).                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
@@ -80,7 +80,7 @@ Código de saída do processo: `0` sucesso, `2` entrada recusada pela validaçã
 - **Primeiro exemplo: peixes, eDNA de água**
 
 ```bash
-.venv\Scripts\python.exe -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness data/example/exemplo_1/eDNA_cipo_subset.csv --groq-api-key <chave>
 ```
 
 O dado de demonstração é um subset randomizado de 50 sequências (80 linhas, sequência × amostra) do projeto eDNA_Cipo, reduzido para manter o consumo de cota de API e o tempo de execução baixos. Sem `--output`, grava tudo em `runs/<run_id>/`: o CSV final (`<run_id>_output_pos_curadoria_LLM.csv`), o log (`<run_id>_log.json`) e um relatório narrativo em PDF, tema Cayman (`<run_id>_relatorio.pdf`).
@@ -88,7 +88,7 @@ O dado de demonstração é um subset randomizado de 50 sequências (80 linhas, 
 - **Uso com referência de amostragens tradicionais**
 
 ```bash
-.venv\Scripts\python.exe -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness data/example/exemplo_1/eDNA_cipo_subset.csv --reference data/example/exemplo_1/spp_tradicional.csv --groq-api-key <chave>
 ```
 
 Mesma execução, mas a curadoria assistida também considera, por ponto de coleta, as espécies já registradas por métodos tradicionais na tabela de `--reference`.
@@ -96,7 +96,7 @@ Mesma execução, mas a curadoria assistida também considera, por ponto de cole
 - **Segundo exemplo: plantas, metabarcoding de raízes**
 
 ```bash
-.venv\Scripts\python.exe -m harness data/example/exemplo_2/dasafio_Amplo-roots_metabar_subset_output-2026-09-15.csv --reference data/example/exemplo_2/roots_metabar_spp_tradicional.csv --config data/example/exemplo_2/config.yaml --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness data/example/exemplo_2/roots_metabar_subset.csv --reference data/example/exemplo_2/roots_metabar_spp_tradicional.csv --config data/example/exemplo_2/config.yaml --groq-api-key <chave>
 ```
 
 Segundo dado de demonstração, do projeto `roots_metabar` (raízes, primer ITS2, plantas), de domínio taxonômico e origem diferentes do primeiro. Não tem dados de latitude/longitude, então a checagem regional por GBIF é pulada. O `--config` aponta o grupo taxonômico alvo para `Plantae` e mapeia o nome de coluna de controle próprio deste dataset (`PCR control`) para o nome interno esperado.
@@ -104,7 +104,7 @@ Segundo dado de demonstração, do projeto `roots_metabar` (raízes, primer ITS2
 - **Com análise ecológica na mesma execução**
 
 ```bash
-.venv\Scripts\python.exe -m harness data/example/exemplo_2/dasafio_Amplo-roots_metabar_subset_output-2026-09-15.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness data/example/exemplo_2/roots_metabar_subset.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia --groq-api-key <chave>
 ```
 
 Mesma execução do primeiro exemplo, mas com `--ecologia`: além do CSV curado, grava riqueza/diversidade por ponto, curva de acumulação, dissimilaridade entre pontos, composição taxonômica e a comparação eDNA × tradicional em `runs/<run_id>/ecologia/`, mais um relatório HTML único (`runs/<run_id>/<run_id>_report.html`) reunindo entrada, cada etapa do determinístico, resultado da LLM e os gráficos ecológicos interativos, que abre sozinho no navegador ao final (ver "Relatório HTML" abaixo).
@@ -133,7 +133,7 @@ O relatório sempre descreve só o que aquela execução específica fez, nunca 
 A curadoria assistida e o relatório narrativo usam o modelo LLM Groq. Para que funcione, é necessário fornecer uma api-key com `--groq-api-key`:
 
 ```bash
-.venv\Scripts\python.exe -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness data/example/exemplo_1/eDNA_cipo_subset.csv --groq-api-key <chave>
 ```
 
 A chave será fornecida por e-mail, uma vez que não pode ser disponibilizada em repositórios públicos como o GitHub, sob risco de cancelamento.
