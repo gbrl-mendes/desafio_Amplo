@@ -104,7 +104,7 @@ Segundo dado de demonstração, do projeto `roots_metabar` (raízes, primer ITS2
 - **Com análise ecológica na mesma execução**
 
 ```bash
-.venv\Scripts\python.exe -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness data/example/exemplo_2/dasafio_Amplo-roots_metabar_subset_output-2026-09-15.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia --groq-api-key <chave>
 ```
 
 Mesma execução do primeiro exemplo, mas com `--ecologia`: além do CSV curado, grava riqueza/diversidade por ponto, curva de acumulação, dissimilaridade entre pontos, composição taxonômica e a comparação eDNA × tradicional em `runs/<run_id>/ecologia/`, mais um relatório HTML único (`runs/<run_id>/report.html`) reunindo entrada, cada etapa do determinístico, resultado da LLM e os gráficos ecológicos interativos (ver "Relatório HTML" abaixo).
