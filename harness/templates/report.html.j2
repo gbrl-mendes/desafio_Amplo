@@ -5,19 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Relatório de execução — desafio_Amplo</title>
 <style>
-  /* Paleta e tipografia derivadas do tema "Cayman" (prettydoc) usado no
-     relatorio em PDF (ver harness/pdf_report.py) -- mesma identidade visual
-     nos dois formatos. Sem link pro Google Fonts aqui: diferente do PDF
-     (gerado uma vez, com internet disponivel), este HTML precisa continuar
-     abrindo e funcionando sem internet depois de pronto -- ver docstring
-     deste modulo. */
+  /* Paleta da marca Amplo -- sobria, cor reservada pra acento pontual (links,
+     titulo de secao, cabecalho, item ativo da navegacao), nao pra grandes
+     areas de fundo. Sem link pro Google Fonts aqui: este HTML precisa
+     continuar abrindo e funcionando sem internet depois de pronto -- ver
+     docstring deste modulo. */
   :root {
-    --cayman-blue: #155799;
-    --cayman-green: #159957;
-    --text: #606c71;
+    --brand-blue: #116994;
+    --brand-green: #009235;
+    --brand-orange: #FF8E1D;
+    --brand-gold: #FFC800;
+    --text: #4a4f54;
     --text-strong: #1a1a1a;
-    --border: #e9ebec;
-    --stripe: #f2f4f7;
+    --border: #e3e5e7;
+    --stripe: #f6f7f8;
+    --surface-dark: #21262b;
     --sidebar-width: 260px;
   }
   * { box-sizing: border-box; }
@@ -28,17 +30,17 @@
   {{ datatables_css }}
   body {
     margin: 0; color: var(--text); background: #fff;
-    font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     line-height: 1.5;
   }
-  a { color: var(--cayman-blue); }
+  a { color: var(--brand-blue); }
 
   /* --- Navegacao lateral, estilo MultiQC: titulos de cada secao, clicar
      leva ate ela (ancora comum); destaca a secao visivel no momento via
      IntersectionObserver (ver script no fim do body). --- */
   .sidebar {
     position: fixed; top: 0; left: 0; bottom: 0; width: var(--sidebar-width);
-    background-image: linear-gradient(160deg, var(--cayman-blue), var(--cayman-green));
+    background: var(--brand-blue);
     color: #fff; overflow-y: auto; z-index: 10;
   }
   .sidebar .brand {
@@ -61,20 +63,20 @@
     text-decoration: none; font-size: .86rem; border-left: 3px solid transparent;
   }
   .sidebar nav a:hover { background: rgba(255, 255, 255, .1); color: #fff; }
-  .sidebar nav a.active { background: rgba(255, 255, 255, .16); border-left-color: #fff; color: #fff; font-weight: 600; }
+  .sidebar nav a.active { background: rgba(255, 255, 255, .1); border-left-color: var(--brand-orange); color: #fff; font-weight: 600; }
 
-  .main-content { margin-left: var(--sidebar-width); max-width: 1400px; padding-bottom: 4rem; }
+  .main-content { margin-left: var(--sidebar-width); padding-bottom: 4rem; }
 
   .page-header {
-    color: #fff; text-align: center; background-color: var(--cayman-green);
-    background-image: linear-gradient(120deg, var(--cayman-blue), var(--cayman-green));
+    color: #fff; text-align: center;
+    background-image: linear-gradient(120deg, var(--brand-blue), var(--brand-green));
     padding: 2rem 2rem 1.75rem;
   }
-  .page-header h1 { margin: 0 0 .3rem; font-size: 1.6rem; font-weight: 400; }
+  .page-header h1 { margin: 0 0 .3rem; font-size: 1.6rem; font-weight: 700; }
   .page-header .meta { opacity: .85; font-size: .95rem; }
 
   section { padding: 1.5rem 2.5rem; border-bottom: 1px solid var(--border); scroll-margin-top: 1rem; }
-  section h2 { margin-top: 0; font-size: 1.25rem; font-weight: 400; color: var(--cayman-green); }
+  section h2 { margin-top: 0; font-size: 1.25rem; font-weight: 400; color: var(--brand-blue); }
   .warning-banner { background: #fff3cd; border: 1px solid #ffe69c; color: #664d03; padding: 1rem 1.5rem; margin: 1.5rem 2.5rem 0; border-radius: 6px; }
   .stage-block { margin-bottom: 1.25rem; }
   .stage-block h3 { margin-bottom: .35rem; font-size: 1rem; color: var(--text-strong); }
@@ -82,12 +84,15 @@
   .stage-block dt { font-weight: 600; color: #444; }
   .stage-block dd { margin: 0; }
   .empty-note { color: #888; font-style: italic; }
-  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; }
-  .summary-grid .stat { background: var(--stripe); border-radius: 6px; padding: .75rem 1rem; }
+  /* flex + justify-content: center (em vez de grid auto-fit esticando cada
+     cartao pra preencher a linha toda) -- com poucos cartoes, centraliza o
+     grupo em vez de deixar um deles esticado e sozinho num canto. */
+  .summary-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: .75rem; }
+  .summary-grid .stat { flex: 0 1 160px; background: var(--stripe); border-radius: 6px; padding: .75rem 1rem; }
   .summary-grid .stat .value { font-size: 1.4rem; font-weight: 700; color: var(--text-strong); }
   .summary-grid .stat .label { font-size: .8rem; color: #666; }
   .flags { margin-top: .75rem; font-size: .85rem; color: #555; }
-  .divergence-case { border-left: 3px solid var(--cayman-green); padding-left: .75rem; margin-bottom: .75rem; font-size: .9rem; }
+  .divergence-case { border-left: 3px solid var(--brand-green); padding-left: .75rem; margin-bottom: .75rem; font-size: .9rem; }
   iframe.plot-frame { width: 100%; height: 520px; border: 1px solid var(--border); border-radius: 6px; }
 
   /* --- Tabelas: a pedido explicito, largura sempre limitada a do
@@ -96,14 +101,37 @@
      nativamente via scrollX (ver script de inicializacao abaixo). --- */
   .table-scroll { max-width: 100%; margin: 1rem 0; }
   table.dataTable { width: 100% !important; font-size: .82rem; }
-  table.dataTable thead th { background: var(--cayman-green); color: #fff; }
-  .dt-scroll-head { background: var(--cayman-green); }
+  table.dataTable thead th { background: var(--brand-blue); color: #fff; }
+  .dt-scroll-head { background: var(--brand-blue); }
+  /* Reforco pro truncamento feito no JS (DataTable.render.ellipsis, na
+     inicializacao) -- garante altura de linha uniforme mesmo se algum
+     valor escapar do truncamento (celula vazia processada diferente, etc). */
+  table.dataTable td, table.dataTable th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
 
-  .narrative { line-height: 1.6; font-size: .95rem; }
-  .narrative h1, .narrative h2, .narrative h3 { font-size: 1.05rem; margin: 1rem 0 .4rem; color: var(--cayman-green); font-weight: 600; }
+  .narrative { max-width: 900px; line-height: 1.6; font-size: .95rem; }
+  .narrative h1, .narrative h2, .narrative h3 { font-size: 1.05rem; margin: 1rem 0 .4rem; color: var(--brand-blue); font-weight: 600; }
   .narrative table { border-collapse: collapse; margin: .5rem 0; }
   .narrative th, .narrative td { border: 1px solid var(--border); padding: .3rem .6rem; }
   .narrative code { background: var(--stripe); padding: .1rem .3rem; border-radius: 3px; font-size: .85em; }
+
+  /* --- Rodape, mesmo espirito do rodape do MultiQC (autoria + link pro
+     repositorio) -- texto pequeno e discreto, nao compete com o conteudo. --- */
+  .report-footer {
+    padding: 1.5rem 2.5rem; color: #888; font-size: .82rem; border-top: 1px solid var(--border);
+  }
+  .report-footer a { color: var(--brand-blue); }
+
+  /* --- Botao flutuante "voltar ao topo": some por padrao, JS mostra depois
+     de rolar um pouco (ver script no fim do body). --- */
+  .back-to-top {
+    position: fixed; right: 1.5rem; bottom: 1.5rem; z-index: 20;
+    width: 44px; height: 44px; border-radius: 50%; border: none;
+    background: var(--brand-blue); color: #fff; font-size: 1.2rem; line-height: 1;
+    cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+    opacity: 0; visibility: hidden; transition: opacity .15s ease;
+  }
+  .back-to-top.visible { opacity: 1; visibility: visible; }
+  .back-to-top:hover { background: var(--brand-green); }
 
   @media (max-width: 860px) {
     .sidebar { position: static; width: 100%; height: auto; }
@@ -129,7 +157,41 @@
     </tbody>
   </table>
 </div>
-<script>$(function () { $('#{{ table.id }}').DataTable({ scrollX: true, scrollCollapse: true }); });</script>
+<script>
+$(function () {
+  // DataTable.render.ellipsis nao existe nesta build vendorizada (e um
+  // renderer extra, nao faz parte do core dataTables.min.js) -- truncamento
+  // proprio, mesmo efeito (corta em 60 caracteres, "…" no fim, texto
+  // completo no atributo title/tooltip nativo do navegador).
+  var truncateScratch = document.createElement('div');
+  function truncateCell(data, type) {
+    if (type !== 'display' || data === null || data === undefined) return data;
+    // DataTables (fonte DOM) pode entregar aqui tanto texto puro quanto o
+    // HTML de origem da celula (ja escapado, ex. "&gt;" em vez de ">") --
+    // passar por um elemento escondido e ler textContent sempre devolve o
+    // texto puro decodificado de qualquer um dos dois casos, sem risco de
+    // escapar duas vezes o mesmo caractere.
+    truncateScratch.innerHTML = data;
+    var str = truncateScratch.textContent || '';
+    if (str.length <= 60) {
+      truncateScratch.textContent = str;
+      return truncateScratch.innerHTML;
+    }
+    var esc = function (s) {
+      truncateScratch.textContent = s;
+      // innerHTML de um no de texto nao escapa aspas (so precisa dentro de
+      // atributo, nao em texto solto) -- escapar a mao pra poder usar no
+      // atributo title= abaixo sem quebrar a marcacao.
+      return truncateScratch.innerHTML.replace(/"/g, '&quot;');
+    };
+    return '<span title="' + esc(str) + '">' + esc(str.slice(0, 60)) + '…</span>';
+  }
+  $('#{{ table.id }}').DataTable({
+    scrollX: true, scrollCollapse: true, autoWidth: false,
+    columnDefs: [{ targets: '_all', render: truncateCell }]
+  });
+});
+</script>
 {% else %}
 <p class="empty-note">Seção não disponível.</p>
 {% endif %}
@@ -193,9 +255,8 @@
     {% if metadata_summary %}
     <div class="summary-grid">
       {% if metadata_summary.amostras is not none %}<div class="stat"><div class="value">{{ metadata_summary.amostras }}</div><div class="label">Amostras</div></div>{% endif %}
-      {% if metadata_summary.amostras_reais is not none %}<div class="stat"><div class="value">{{ metadata_summary.amostras_reais }}</div><div class="label">Amostras reais</div></div>{% endif %}
-      {% if metadata_summary.controles is not none %}<div class="stat"><div class="value">{{ metadata_summary.controles }}</div><div class="label">Controles</div></div>{% endif %}
-      {% if metadata_summary.pontos_unicos is not none %}<div class="stat"><div class="value">{{ metadata_summary.pontos_unicos }}</div><div class="label">Pontos únicos</div></div>{% endif %}
+      {% if metadata_summary.amostras_reais is not none %}<div class="stat"><div class="value">{{ metadata_summary.amostras_reais }}</div><div class="label">Replicatas</div></div>{% endif %}
+      {% if metadata_summary.controles is not none %}<div class="stat"><div class="value">{{ metadata_summary.controles }}</div><div class="label">Categoria de controles</div></div>{% endif %}
       {% if metadata_summary.data_min and metadata_summary.data_max %}<div class="stat"><div class="value" style="font-size:1rem;">{{ metadata_summary.data_min }} – {{ metadata_summary.data_max }}</div><div class="label">Faixa de datas</div></div>{% endif %}
     </div>
     <div class="flags">
@@ -315,7 +376,14 @@
     <p class="empty-note">Seção não disponível.</p>
   </section>
   {% endif %}
+
+  <footer class="report-footer">
+    Relatório gerado pelo harness de curadoria de ASVs do projeto desafio_Amplo ·
+    Escrito por <a href="mailto:gabrielmendesbrt@gmail.com">Gabriel Mendes</a>, disponível no <a href="https://github.com/gbrl-mendes/desafio_Amplo/" target="_blank" rel="noopener">GitHub</a>.
+  </footer>
 </div>
+
+<button type="button" class="back-to-top" id="back-to-top" title="Voltar ao topo" aria-label="Voltar ao topo">↑</button>
 
 <script>
 // Scrollspy simples, estilo MultiQC: destaca na navegacao lateral a secao
@@ -341,6 +409,18 @@
   Object.keys(linkByTarget).forEach(function (id) {
     var section = document.getElementById(id);
     if (section) observer.observe(section);
+  });
+})();
+
+// Botao "voltar ao topo": aparece depois de rolar um pouco, rolagem suave ao clicar.
+(function () {
+  var btn = document.getElementById("back-to-top");
+  if (!btn) return;
+  window.addEventListener("scroll", function () {
+    btn.classList.toggle("visible", window.scrollY > 400);
+  });
+  btn.addEventListener("click", function () {
+    window.scrollTo({ top: 0, behavior: "smooth" });
   });
 })();
 </script>

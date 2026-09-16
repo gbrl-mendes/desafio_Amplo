@@ -67,9 +67,6 @@ def _metadata_summary(df: Optional[pd.DataFrame]) -> Optional[dict]:
         tipo = df["Type"].astype(str).str.strip().str.casefold()
         summary["amostras_reais"] = int((tipo == "sample").sum())
         summary["controles"] = int((tipo != "sample").sum())
-    if "Ponto" in df.columns:
-        summary["pontos_unicos"] = int(df["Ponto"].nunique(dropna=True))
-
     for col in ("Latitude", "Longitude", "Habitat", "Rios"):
         summary[f"tem_{col.lower()}"] = bool(col in df.columns and df[col].notna().any())
 
