@@ -27,7 +27,11 @@
   .divergence-case { border-left: 3px solid #c9a227; padding-left: .75rem; margin-bottom: .75rem; font-size: .9rem; }
   iframe.plot-frame { width: 100%; height: 520px; border: 1px solid #e2e2e2; border-radius: 6px; }
   table.dataTable { width: 100% !important; font-size: .82rem; }
-  .narrative { white-space: pre-wrap; line-height: 1.5; font-size: .92rem; }
+  .narrative { line-height: 1.5; font-size: .92rem; }
+  .narrative h1, .narrative h2, .narrative h3 { font-size: 1rem; margin: .9rem 0 .3rem; }
+  .narrative table { border-collapse: collapse; margin: .5rem 0; }
+  .narrative th, .narrative td { border: 1px solid #ddd; padding: .3rem .6rem; }
+  .narrative code { background: #f2f4f7; padding: .1rem .3rem; border-radius: 3px; font-size: .85em; }
   {{ datatables_css }}
 </style>
 <script>{{ jquery_js }}</script>
@@ -151,8 +155,8 @@
 
   <section>
     <h2>Curadoria assistida por LLM</h2>
-    {% if report_text %}
-      <div class="narrative">{{ report_text }}</div>
+    {% if report_html %}
+      <div class="narrative">{{ report_html }}</div>
     {% elif llm_reviewed_count is not none %}
       <p>{{ llm_reviewed_count }} de {{ llm_total_unique_asvs }} ASVs únicas revisadas.</p>
     {% else %}

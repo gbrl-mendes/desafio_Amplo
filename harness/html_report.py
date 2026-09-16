@@ -18,8 +18,10 @@ import base64
 from pathlib import Path
 from typing import Optional
 
+import markdown as markdown_lib
 import pandas as pd
 from jinja2 import Environment, FileSystemLoader
+from markupsafe import Markup
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -80,6 +82,17 @@ def _metadata_summary(df: Optional[pd.DataFrame]) -> Optional[dict]:
         break
 
     return summary
+
+
+def _render_markdown(text: Optional[str]) -> Optional[Markup]:
+    """Converte o relatorio narrativo (markdown) pro HTML renderizado --
+    sem isso, o texto aparece na pagina com a sintaxe markdown literal
+    (`**negrito**`, `# titulo`) em vez de formatada. `Markup` sinaliza pro
+    Jinja2 (autoescape=True) que este HTML ja e confiavel e nao deve ser
+    escapado de novo -- foi gerado aqui mesmo, nao e texto de terceiros."""
+    if not text:
+        return None
+    return Markup(markdown_lib.markdown(text, extensions=["tables", "fenced_code", "sane_lists"]))
 
 
 def _ecologia_plots(ecologia_output_dir: Optional[str]) -> list[dict]:
@@ -143,7 +156,7 @@ def build_html_report(context: dict) -> str:
         input_table=_dataframe_to_table(input_df, "tabela-entrada"),
         diagnostics=context.get("diagnostics"),
         deterministic_table=_dataframe_to_table(context.get("deterministic_df"), "tabela-deterministica"),
-        report_text=context.get("report_text"),
+        report_html=_render_markdown(context.get("report_text")),
         llm_divergence_examples=context.get("llm_divergence_examples") or [],
         llm_reviewed_count=context.get("llm_reviewed_count"),
         llm_total_unique_asvs=context.get("llm_total_unique_asvs"),

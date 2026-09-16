@@ -8,9 +8,11 @@ Divisao de responsabilidades (nenhuma logica de curadoria mora aqui):
                                    como subprocesso).
   - harness/llm_curation.py       curadoria assistida por LLM (etapa
                                    opcional, so pra ASVs inconclusivas).
-  - harness/report_generation.py  relatorio narrativo da execucao (etapa
-                                   opcional, apoiada por LLM sobre agregados
-                                   ja calculados).
+  - harness/report_generation.py  relatorio narrativo da execucao em markdown
+                                   (etapa opcional, apoiada por LLM sobre
+                                   agregados ja calculados).
+  - harness/pdf_report.py         renderiza esse markdown como PDF (tema
+                                   Cayman), a entrega final do relatorio.
   - harness/progress.py           narracao verbose obrigatoria (resumo da
                                    entrada, checkpoint) e a pergunta do
                                    checkpoint em si.
@@ -23,7 +25,7 @@ pergunta se ha custo real de LLM em jogo) -> curadoria assistida por LLM
 (opcional) -> relatorio narrativo (opcional) -> loga. Cada etapa gera um
 "RunResult" serializavel, gravado em `runs/<timestamp>.json` (checkpoint em
 `runs/<timestamp>_checkpoint.json`, relatorio em
-`runs/<timestamp>_relatorio.md`), para responder depois "o que foi feito e
+`runs/<timestamp>_relatorio.pdf`), para responder depois "o que foi feito e
 por que" sem precisar reexecutar nada.
 """
 
@@ -56,6 +58,7 @@ from harness.progress import (
     format_input_summary,
 )
 from harness.html_report import build_html_report
+from harness.pdf_report import markdown_to_pdf_bytes
 from harness.report_generation import ReportContext, ReportGenerationResult, build_report_stats, generate_report
 from tools.schema_validation import load_column_aliases, load_schema, validate_asv_table
 
@@ -533,10 +536,28 @@ def run(
     report_path = None
     if report_text is not None:
         timestamp = started_at.replace(":", "-").replace("+00-00", "Z")
-        report_file = runs_dir / f"{timestamp}_relatorio.md"
+        report_file = runs_dir / f"{timestamp}_relatorio.pdf"
         report_file.parent.mkdir(parents=True, exist_ok=True)
-        report_file.write_text(report_text, encoding="utf-8")
-        report_path = str(report_file)
+        try:
+            subtitle_parts = [
+                v for v in (_first_value(df, "Researcher"), _first_value(df, "Project"), _first_value(df, "Primer"))
+                if v
+            ]
+            subtitle_parts.append(started_at)
+            pdf_bytes = markdown_to_pdf_bytes(
+                report_text, title="Relatório de Curadoria de ASVs", subtitle=" | ".join(subtitle_parts)
+            )
+            report_file.write_bytes(pdf_bytes)
+            report_path = str(report_file)
+        except Exception as exc:
+            # Mesma logica de protecao das outras etapas: uma falha so na
+            # renderizacao do PDF nao invalida o relatorio ja gerado pelo
+            # LLM (o texto markdown continua disponivel via report_text,
+            # so o arquivo final e que nao fica pronto).
+            report_result = ReportGenerationResult(
+                mode=report_result.mode if report_result else effective_llm_mode,
+                error=f"Falha ao renderizar o relatorio em PDF: {exc}",
+            )
 
     ecologia_output_dir = None
     ecologia_exit_code = None

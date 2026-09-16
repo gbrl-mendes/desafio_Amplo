@@ -200,7 +200,10 @@ def test_success_writes_report_alongside_json_log_in_mock_mode(tmp_path):
     report_file = Path(result.report_path)
     assert report_file.exists()
     assert report_file.parent == runs_dir
-    assert "[mock]" in report_file.read_text(encoding="utf-8")
+    assert report_file.suffix == ".pdf"
+    # PDF binario (compactado pelo xhtml2pdf) -- confere a assinatura do
+    # formato em vez de procurar texto, que nao sobrevive a compressao.
+    assert report_file.read_bytes().startswith(b"%PDF")
 
 
 def test_checkpoint_writes_own_log_regardless_of_llm_mode(tmp_path):

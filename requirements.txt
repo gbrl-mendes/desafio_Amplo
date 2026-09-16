@@ -4,6 +4,12 @@ pandas==3.0.5
 PyYAML==6.0.3
 requests==2.34.2
 Jinja2==3.1.6
+# Markdown so converte o texto do relatorio narrativo pra HTML -- o PDF em
+# si (harness/pdf_report.py) e impresso por um navegador Chromium local
+# (Edge no Windows, ja vem instalado por padrao; ou Chrome), nao por uma
+# biblioteca Python, pra ter fidelidade total ao CSS do tema (gradiente
+# do banner, fonte web).
+Markdown==3.10.3
 
 # Dev/testes (tests/, pytest.ini implicito) -- nao necessario so pra rodar
 # `python -m harness`, so pra rodar a suite de testes.
