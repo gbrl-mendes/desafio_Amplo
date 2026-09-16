@@ -14,7 +14,7 @@ Para instalar e rodar o exemplo básico, veja o [README](README.md). Este docume
 | [`harness/orchestrator.py`](harness/orchestrator.py)               | Integração de todas as etapas: validação da entrada, execução do pipeline em R, verificação do output do R, chamada da curadoria assistida por LLM, geração do relatório narrativo, análise ecológica opcional, geração do relatório HTML único, e gravação do log em JSON de cada execução.                                                                                                                                                                                                                     |
 | [`harness/llm_curation.py`](harness/llm_curation.py)               | Curadoria assistida por LLM, via Groq.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | [`harness/report_generation.py`](harness/report_generation.py)     | Relatório narrativo da execução em markdown, também via Groq, a partir dos agregados gerados nas etapas anteriores.                                                                                                                                                                                                                                                                                                                                                                                              |
-| [`harness/pdf_report.py`](harness/pdf_report.py)                   | Renderiza o markdown de `report_generation.py` como PDF (tema Cayman), a entrega final gravada em `runs/<run_id>/relatorio.pdf`.                                                                                                                                                                                                                                                                                                                                                                                 |
+| [`harness/pdf_report.py`](harness/pdf_report.py)                   | Renderiza o markdown de `report_generation.py` como PDF (tema Cayman), a entrega final gravada em `runs/<run_id>/<run_id>_relatorio.pdf`.                                                                                                                                                                                                                                                                                                                                                                                 |
 | [`harness/html_report.py`](harness/html_report.py)                 | Relatório HTML único por execução (ver "Relatório HTML" abaixo), gerado só quando a análise ecológica roda.                                                                                                                                                                                                                                                                                                                                                                                                      |
 | [`harness/__main__.py`](harness/__main__.py)                       | Ponto de entrada da linha de comando (`python -m harness`).                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
@@ -47,10 +47,10 @@ bash setup.sh
 
 - `<entrada.csv>`: obrigatório, a menos que `--ecologia-somente` seja usado no lugar. Schema completo em [`data/reference/asv_input_schema.yaml`](data/reference/asv_input_schema.yaml).
 - `--config`: YAML opcional que sobrescreve os parâmetros padrão e permite usar um CSV com nomes de coluna diferentes dos que o sistema espera (ver "Configuração" abaixo). Fica registrado no log da execução, para rastreabilidade.
-- `--output`: caminho do CSV final. Por padrão, `runs/<run_id>/output_pos_curadoria_LLM.csv`.
+- `--output`: caminho do CSV final. Por padrão, `runs/<run_id>/<run_id>_output_pos_curadoria_LLM.csv`.
 - `--runs-dir`: pasta-base onde gravar os artefatos de cada execução -- cada `run_id` ganha sua própria sub-pasta ali dentro (ver "Onde cada execução grava seus arquivos" abaixo). Por padrão, `runs/`.
 - `--llm-mode`: um único parâmetro para as duas etapas que usam a Groq, a curadoria assistida (`harness/llm_curation.py`) e o relatório narrativo (`harness/report_generation.py`):
-  - `live` (padrão): chama a Groq nas duas etapas, preenchendo as colunas `Assisted ID/Confidence/Justification (LLM)` e gravando o relatório em `runs/<run_id>/relatorio.pdf`. Sem chave configurada, as duas etapas são puladas e a execução segue normalmente.
+  - `live` (padrão): chama a Groq nas duas etapas, preenchendo as colunas `Assisted ID/Confidence/Justification (LLM)` e gravando o relatório em `runs/<run_id>/<run_id>_relatorio.pdf`. Sem chave configurada, as duas etapas são puladas e a execução segue normalmente.
   - `mock`: não chama a Groq, preenche as mesmas colunas e o mesmo relatório com uma resposta simulada, para testar o encadeamento sem gastar cota de API.
   - `off`: pula as duas etapas por completo. Sai só o CSV do pipeline em R e o log JSON, sem colunas assistidas e sem relatório narrativo.
 - `--reference`: CSV opcional (`;`-delimitado, UTF-8, pelo menos 2 colunas: ponto amostral na primeira, taxon na última ou numa coluna chamada `Taxon_binomial`; colunas extras no meio, e o nome literal de cada coluna, são irrelevantes) com espécies já registradas por métodos tradicionais nos mesmos pontos amostrais, usado como evidência adicional na curadoria assistida (ver [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md)). Também alimenta a comparação eDNA × tradicional de `--ecologia`, se essa flag for usada. Exemplo em [`data/example/exemplo_1/spp_tradicional.csv`](data/example/exemplo_1/spp_tradicional.csv).
@@ -60,15 +60,15 @@ bash setup.sh
 
 ### Onde cada execução grava seus arquivos
 
-Cada execução ganha sua própria sub-pasta em `runs/`, nomeada com o `run_id` (curto e ordenável cronologicamente, ex. `20260916-004104`) -- em vez de arquivos soltos e misturados direto em `runs/`, tudo que uma execução produziu fica junto:
+Cada execução ganha sua própria sub-pasta em `runs/`, nomeada com o `run_id` (curto e ordenável cronologicamente, ex. `20260916-004104`) -- em vez de arquivos soltos e misturados direto em `runs/`, tudo que uma execução produziu fica junto. Os arquivos direto dentro dessa pasta também levam o `run_id` no próprio nome (a pasta `ecologia/` não, já que seu nome já está dentro da pasta do `run_id`):
 
 ```
 runs/<run_id>/
-├── log.json              # status, validação, o que a curadoria assistida revisou, avisos e erros
-├── output_pos_curadoria_LLM.csv   # CSV final (a menos que --output aponte pra outro caminho)
-├── relatorio.pdf          # relatório narrativo em PDF, só com --llm-mode != off
-├── report.html            # relatório HTML único, só quando a análise ecológica roda
-└── ecologia/               # tabelas (CSV) e gráficos (PNG/HTML), só com --ecologia ou --ecologia-somente
+├── <run_id>_log.json                            # status, validação, o que a curadoria assistida revisou, avisos e erros
+├── <run_id>_output_pos_curadoria_LLM.csv         # CSV final (a menos que --output aponte pra outro caminho)
+├── <run_id>_relatorio.pdf                        # relatório narrativo em PDF, só com --llm-mode != off
+├── <run_id>_report.html                          # relatório HTML único, só quando a análise ecológica roda
+└── ecologia/                                     # tabelas (CSV) e gráficos (PNG/HTML), só com --ecologia ou --ecologia-somente
 ```
 
 O CSV final sempre traz uma coluna `Curated ID`, preenchida automaticamente (`Assisted ID (LLM)` quando existir, senão a identificação determinística). É a mesma coluna que, no fluxo tradicional deste tipo de projeto, um especialista preencheria à mão antes da análise ecológica: aqui vem pré-preenchida como sugestão, e o profissional pode revisar e sobrescrever qualquer valor antes de rodar `--ecologia` (nessa mesma execução) ou `--ecologia-somente` (numa execução separada, depois de revisar o CSV). Essa versão automática não é o gabarito de curadoria humana revisado formalmente: essa validação, quando feita, acontece fora deste repositório (ver [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md)).
@@ -83,7 +83,7 @@ Código de saída do processo: `0` sucesso, `2` entrada recusada pela validaçã
 .venv\Scripts\python.exe -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --groq-api-key <chave>
 ```
 
-O dado de demonstração é um subset randomizado de 50 sequências (80 linhas, sequência × amostra) do projeto eDNA_Cipo, reduzido para manter o consumo de cota de API e o tempo de execução baixos. Sem `--output`, grava tudo em `runs/<run_id>/`: o CSV final (`output_pos_curadoria_LLM.csv`), o log (`log.json`) e um relatório narrativo em PDF, tema Cayman (`relatorio.pdf`).
+O dado de demonstração é um subset randomizado de 50 sequências (80 linhas, sequência × amostra) do projeto eDNA_Cipo, reduzido para manter o consumo de cota de API e o tempo de execução baixos. Sem `--output`, grava tudo em `runs/<run_id>/`: o CSV final (`<run_id>_output_pos_curadoria_LLM.csv`), o log (`<run_id>_log.json`) e um relatório narrativo em PDF, tema Cayman (`<run_id>_relatorio.pdf`).
 
 - **Uso com referência de amostragens tradicionais**
 
@@ -107,19 +107,21 @@ Segundo dado de demonstração, do projeto `roots_metabar` (raízes, primer ITS2
 .venv\Scripts\python.exe -m harness data/example/exemplo_2/dasafio_Amplo-roots_metabar_subset_output-2026-09-15.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia --groq-api-key <chave>
 ```
 
-Mesma execução do primeiro exemplo, mas com `--ecologia`: além do CSV curado, grava riqueza/diversidade por ponto, curva de acumulação, dissimilaridade entre pontos, composição taxonômica e a comparação eDNA × tradicional em `runs/<run_id>/ecologia/`, mais um relatório HTML único (`runs/<run_id>/report.html`) reunindo entrada, cada etapa do determinístico, resultado da LLM e os gráficos ecológicos interativos (ver "Relatório HTML" abaixo).
+Mesma execução do primeiro exemplo, mas com `--ecologia`: além do CSV curado, grava riqueza/diversidade por ponto, curva de acumulação, dissimilaridade entre pontos, composição taxonômica e a comparação eDNA × tradicional em `runs/<run_id>/ecologia/`, mais um relatório HTML único (`runs/<run_id>/<run_id>_report.html`) reunindo entrada, cada etapa do determinístico, resultado da LLM e os gráficos ecológicos interativos, que abre sozinho no navegador ao final (ver "Relatório HTML" abaixo).
 
 - **Análise ecológica separada, sobre um CSV revisado à mão**
 
 ```bash
-.venv\Scripts\python.exe -m harness --ecologia-somente runs/20260915-153000/output_pos_curadoria_LLM.csv --reference data/example/exemplo_1/spp_tradicional.csv --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness --ecologia-somente runs/20260915-153000/20260915-153000_output_pos_curadoria_LLM.csv --reference data/example/exemplo_1/spp_tradicional.csv --groq-api-key <chave>
 ```
 
 Depois de revisar `Curated ID` manualmente num CSV já curado por uma execução anterior, roda só a análise ecológica sobre essa versão revisada, sem refazer a curadoria. Gera seu próprio log e seu próprio relatório HTML, mais enxuto (sem tabela de entrada nem resumos do determinístico, já que essa execução não rodou essas etapas, ver "Relatório HTML").
 
 ## Relatório HTML
 
-Toda execução que roda a análise ecológica (`--ecologia` ou `--ecologia-somente`) gera também um relatório único em `runs/<run_id>/report.html`, autocontido (sem depender de internet ou de outros arquivos para abrir), com navegação lateral por seção (estilo MultiQC -- clicar no título de uma seção leva até ela) e tabelas com barra de rolagem própria (nunca estouram a largura da página).
+Toda execução que roda a análise ecológica (`--ecologia` ou `--ecologia-somente`) gera também um relatório único em `runs/<run_id>/<run_id>_report.html`, autocontido (sem depender de internet ou de outros arquivos para abrir), com navegação lateral por seção (estilo MultiQC -- clicar no título de uma seção leva até ela) e tabelas com barra de rolagem própria (nunca estouram a largura da página).
+
+Assim que fica pronto, o relatório abre sozinho no navegador, numa janela nova (não aba, quando o navegador padrão é Chromium/Edge). A barra lateral também traz um botão "Abrir pasta desta execução", que abre numa aba nova a pasta `runs/<run_id>/` (CSV final, PDF, e a pasta `ecologia/` com todos os gráficos e tabelas) -- útil pra quem só quer navegar pelo relatório, mas eventualmente precisa pegar um arquivo específico sem procurar no explorador de arquivos.
 
 O relatório sempre descreve só o que aquela execução específica fez, nunca finge ter visto uma etapa que não rodou nela:
 

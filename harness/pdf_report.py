@@ -125,11 +125,13 @@ _PAGE_TEMPLATE = """<!DOCTYPE html>
 """
 
 
-def _find_chromium_browser() -> Optional[str]:
-    """Localiza um navegador Chromium local (Edge no Windows, ou Chrome)
-    pra imprimir o HTML como PDF em modo headless. Edge vem instalado por
-    padrao em qualquer Windows 10/11, entao normalmente nao precisa
-    instalar nada a mais so pra este recurso."""
+def find_chromium_browser() -> Optional[str]:
+    """Localiza um navegador Chromium local (Edge no Windows, ou Chrome) --
+    usado tanto pra imprimir o HTML como PDF em modo headless (abaixo)
+    quanto pra abrir o relatorio HTML automaticamente numa janela nova ao
+    final da execucao (ver harness/orchestrator.py::open_report_in_browser).
+    Edge vem instalado por padrao em qualquer Windows 10/11, entao
+    normalmente nao precisa instalar nada a mais so pra estes recursos."""
     for exe_name in ("msedge", "chrome", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
         found = shutil.which(exe_name)
         if found:
@@ -157,7 +159,7 @@ def markdown_to_pdf_bytes(markdown_text: str, title: str, subtitle: str | None =
     ela, cai graciosamente pro fallback sans-serif do sistema (so muda a
     aparencia da fonte, nada quebra).
     """
-    browser = _find_chromium_browser()
+    browser = find_chromium_browser()
     if browser is None:
         raise RuntimeError(
             "Nenhum navegador Chromium (Edge/Chrome) encontrado no sistema -- necessario "

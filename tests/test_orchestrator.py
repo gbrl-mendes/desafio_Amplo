@@ -114,10 +114,11 @@ def test_default_output_filename_when_output_not_given(tmp_path):
 
     assert result.status == "success"
     output_path = Path(result.output_path)
-    assert output_path.name == "output_pos_curadoria_LLM.csv"
     # Dentro da pasta da propria execucao (runs/<run_id>/...), nao solto em runs/.
     assert output_path.parent.parent == runs_dir
-    assert re.fullmatch(r"\d{8}-\d{6}", output_path.parent.name)
+    run_id = output_path.parent.name
+    assert re.fullmatch(r"\d{8}-\d{6}", run_id)
+    assert output_path.name == f"{run_id}_output_pos_curadoria_LLM.csv"
 
 
 def test_refused_when_required_column_renamed_without_alias_config(tmp_path):
@@ -222,9 +223,11 @@ def test_run_id_is_short_and_sortable(tmp_path):
     )
 
     assert result.status == "success"
-    log_files = list(runs_dir.rglob("log.json"))
+    log_files = list(runs_dir.rglob("*_log.json"))
     assert len(log_files) == 1  # um so arquivo de log por execucao, nao mais checkpoint/diagnostics separados
-    assert re.fullmatch(r"\d{8}-\d{6}", log_files[0].parent.name)
+    run_id = log_files[0].parent.name
+    assert re.fullmatch(r"\d{8}-\d{6}", run_id)
+    assert log_files[0].name == f"{run_id}_log.json"
 
 
 def test_run_log_written_progressively_before_and_after_llm_confirmation(tmp_path):
@@ -234,7 +237,7 @@ def test_run_log_written_progressively_before_and_after_llm_confirmation(tmp_pat
         # No momento em que o usuario e perguntado, o log parcial ja deve
         # estar em disco com status "aguardando_confirmacao_llm".
         runs_dir = tmp_path / "runs"
-        log_files = list(runs_dir.rglob("log.json"))
+        log_files = list(runs_dir.rglob("*_log.json"))
         assert len(log_files) == 1
         partial = json.loads(log_files[0].read_text(encoding="utf-8"))
         seen_statuses.append(partial["status"])
@@ -255,7 +258,7 @@ def test_run_log_written_progressively_before_and_after_llm_confirmation(tmp_pat
     assert seen_statuses == ["aguardando_confirmacao_llm"]
     assert result.status == "success"  # sobrescrito no final, no mesmo arquivo
     runs_dir = tmp_path / "runs"
-    log_files = list(runs_dir.rglob("log.json"))
+    log_files = list(runs_dir.rglob("*_log.json"))
     assert len(log_files) == 1
     final = json.loads(log_files[0].read_text(encoding="utf-8"))
     assert final["status"] == "success"
@@ -283,10 +286,10 @@ def test_success_writes_report_alongside_json_log_in_mock_mode(tmp_path):
     assert result.report_path is not None
     report_file = Path(result.report_path)
     assert report_file.exists()
-    # Dentro da pasta da propria execucao (runs/<run_id>/relatorio.pdf), nao
-    # solto em runs/ -- independente de --output ter sido customizado.
+    # Dentro da pasta da propria execucao (runs/<run_id>/<run_id>_relatorio.pdf),
+    # nao solto em runs/ -- independente de --output ter sido customizado.
     assert report_file.parent.parent == runs_dir
-    assert report_file.name == "relatorio.pdf"
+    assert report_file.name == f"{report_file.parent.name}_relatorio.pdf"
     assert report_file.suffix == ".pdf"
     # PDF binario (compactado pelo xhtml2pdf) -- confere a assinatura do
     # formato em vez de procurar texto, que nao sobrevive a compressao.
@@ -545,6 +548,12 @@ def _fake_eco_runner_success(rscript_exe, curated_csv, output_dir, config_path, 
     return subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
 
 
+def _noop_browser_opener(html_path):
+    # Nunca abre um navegador de verdade durante os testes -- mesmo padrao
+    # de injecao de dependencia usado pra r_runner/eco_runner/rscript_exe.
+    pass
+
+
 def test_ecologia_off_by_default_does_not_call_eco_runner(tmp_path):
     calls = []
 
@@ -575,6 +584,7 @@ def test_ecologia_true_calls_eco_runner_and_records_output_dir(tmp_path):
         llm_mode="off",
         ecologia=True,
         eco_runner=_fake_eco_runner_success,
+        browser_opener=_noop_browser_opener,
     )
 
     assert result.status == "success"
@@ -625,12 +635,13 @@ def test_ecologia_somente_success_writes_log_with_tipo_execucao(tmp_path):
         runs_dir=runs_dir,
         rscript_exe="rscript-fake",
         eco_runner=_fake_eco_runner_success,
+        browser_opener=_noop_browser_opener,
     )
 
     assert result.status == "success"
     assert result.tipo_execucao == "ecologia_somente"
     assert result.ecologia_output_dir is not None
-    log_files = list(runs_dir.rglob("log.json"))
+    log_files = list(runs_dir.rglob("*_log.json"))
     assert log_files
     log_data = json.loads(log_files[0].read_text(encoding="utf-8"))
     assert log_data["tipo_execucao"] == "ecologia_somente"
@@ -694,6 +705,7 @@ def test_html_report_generated_when_ecologia_succeeds(tmp_path):
         llm_mode="mock",
         ecologia=True,
         eco_runner=_fake_eco_runner_success,
+        browser_opener=_noop_browser_opener,
     )
 
     assert result.status == "success"
@@ -726,6 +738,7 @@ def test_html_report_generated_by_ecologia_somente(tmp_path):
         runs_dir=tmp_path / "runs",
         rscript_exe="rscript-fake",
         eco_runner=_fake_eco_runner_success,
+        browser_opener=_noop_browser_opener,
     )
 
     assert result.status == "success"

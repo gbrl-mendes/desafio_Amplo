@@ -27,8 +27,6 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 bash setup.sh
 ```
 
-</details>
-
 ## Execução
 
 ```bash

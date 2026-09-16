@@ -23,9 +23,9 @@ Fluxo: resumo da entrada -> valida -> (recusa se bloqueante) -> roda o R
 (saida ao vivo) -> verifica a saida -> checkpoint (metricas + pergunta se ha
 custo real de LLM em jogo) -> curadoria assistida por LLM (opcional) ->
 relatorio narrativo (opcional) -> loga. Cada etapa gera um "RunResult"
-serializavel, gravado num unico `runs/<run_id>/log.json` por execucao
-(`run_id` curto, ex. `20260916-004104` -- ver `_make_run_id`). Esse arquivo
-e gravado duas vezes numa execucao bem-sucedida: uma vez em
+serializavel, gravado num unico `runs/<run_id>/<run_id>_log.json` por
+execucao (`run_id` curto, ex. `20260916-004104` -- ver `_make_run_id`). Esse
+arquivo e gravado duas vezes numa execucao bem-sucedida: uma vez em
 `status="aguardando_confirmacao_llm"`, logo apos ler o diagnostico do R e
 antes de perguntar se vale a pena prosseguir pra curadoria assistida (assim
 sobra um registro em disco do que foi decidido ate ali mesmo se o processo
@@ -34,9 +34,13 @@ e de novo no final com o conteudo completo -- sem precisar de arquivos
 `_checkpoint.json`/`_diagnostics.json` separados, cujo conteudo se
 sobrepunha bastante ao do log principal. Todo artefato de uma execucao (log,
 CSV de saida quando nao especificado por `--output`, relatorio em
-`runs/<run_id>/relatorio.pdf`, relatorio HTML, pasta `ecologia/`) fica dentro
-dessa mesma pasta `runs/<run_id>/`, em vez de solto direto em `runs/` --
-ver `run_dir()`.
+`runs/<run_id>/<run_id>_relatorio.pdf`, relatorio HTML, pasta `ecologia/`)
+fica dentro dessa mesma pasta `runs/<run_id>/`, em vez de solto direto em
+`runs/` -- ver `run_dir()`. Os arquivos direto dentro dessa pasta (fora de
+`ecologia/`) levam o `run_id` no proprio nome, pra continuarem se
+identificando sozinhos mesmo copiados/abertos fora da pasta. O relatorio
+HTML tambem abre sozinho no navegador (janela nova) assim que fica pronto
+-- ver `open_report_in_browser`.
 """
 
 from __future__ import annotations
@@ -46,6 +50,7 @@ import json
 import shutil
 import subprocess
 import threading
+import webbrowser
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -68,7 +73,7 @@ from harness.progress import (
     format_input_summary,
 )
 from harness.html_report import build_html_report
-from harness.pdf_report import markdown_to_pdf_bytes
+from harness.pdf_report import find_chromium_browser, markdown_to_pdf_bytes
 from harness.report_generation import ReportContext, ReportGenerationResult, build_report_stats, generate_report
 from tools.schema_validation import load_column_aliases, load_schema, validate_asv_table
 
@@ -239,6 +244,7 @@ def default_r_runner(
 
 
 EcoRunner = Callable[..., subprocess.CompletedProcess]
+BrowserOpener = Callable[[Path], None]
 
 
 def default_eco_runner(
@@ -292,23 +298,42 @@ def run_dir(runs_dir: Path, run_id: str) -> Path:
     artefatos de uma mesma execucao (log, CSV de saida quando nao
     especificado por `--output`, relatorio em PDF, relatorio HTML, pasta da
     analise ecologica) moram juntos ali, em vez de espalhados soltos direto
-    em `runs/`."""
+    em `runs/`. Os arquivos direto dentro dessa pasta (nao os de dentro de
+    `ecologia/`) tambem levam o `run_id` no proprio nome (ex.
+    `<run_id>_report.html`) -- assim cada arquivo continua se identificando
+    sozinho mesmo copiado/aberto fora do contexto da pasta."""
     return runs_dir / run_id
 
 
 def write_run_log(result: RunResult, runs_dir: Path, run_id: str) -> Path:
-    """Grava (ou sobrescreve) `runs/<run_id>/log.json`. Chamada mais de uma
-    vez pro mesmo `run_id` durante uma execucao bem-sucedida (ver `run()`):
-    uma vez em `status="aguardando_confirmacao_llm"`, com o que ja se sabe
-    antes de perguntar sobre a curadoria assistida, e de novo no final com o
-    conteudo completo -- assim ainda sobra um registro em disco do que foi
-    decidido ate ali se o processo travar ou for encerrado no meio, sem
-    precisar de um segundo arquivo so pra isso."""
+    """Grava (ou sobrescreve) `runs/<run_id>/<run_id>_log.json`. Chamada mais
+    de uma vez pro mesmo `run_id` durante uma execucao bem-sucedida (ver
+    `run()`): uma vez em `status="aguardando_confirmacao_llm"`, com o que ja
+    se sabe antes de perguntar sobre a curadoria assistida, e de novo no
+    final com o conteudo completo -- assim ainda sobra um registro em disco
+    do que foi decidido ate ali se o processo travar ou for encerrado no
+    meio, sem precisar de um segundo arquivo so pra isso."""
     target_dir = run_dir(runs_dir, run_id)
     target_dir.mkdir(parents=True, exist_ok=True)
-    log_path = target_dir / "log.json"
+    log_path = target_dir / f"{run_id}_log.json"
     log_path.write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
     return log_path
+
+
+def open_report_in_browser(html_path: Path) -> None:
+    """Abre o relatorio HTML automaticamente ao final da execucao, numa
+    janela nova (nao aba) sempre que possivel. `--new-window` e uma flag
+    real do Chromium que forca isso mesmo quando o navegador ja esta aberto
+    (mesmo navegador Chromium usado pra imprimir o PDF, ver
+    pdf_report.py::find_chromium_browser) -- sem um Chromium disponivel, cai
+    pro `webbrowser` padrao do Python, que abre no navegador default do
+    sistema mas sem garantia de janela nova (depende do navegador/SO)."""
+    url = html_path.resolve().as_uri()
+    browser = find_chromium_browser()
+    if browser:
+        subprocess.Popen([browser, "--new-window", url])
+        return
+    webbrowser.open(url, new=1)
 
 
 def _make_run_id(moment: datetime) -> str:
@@ -336,6 +361,7 @@ def run(
     eco_runner: EcoRunner = default_eco_runner,
     groq_api_key: Optional[str] = None,
     groq_model: Optional[str] = None,
+    browser_opener: BrowserOpener = open_report_in_browser,
 ) -> RunResult:
     """Executa uma rodada completa: resumo da entrada -> valida -> roda o R
     (saida ao vivo) -> verifica -> checkpoint -> curadoria assistida por LLM
@@ -387,6 +413,13 @@ def run(
     e `generate_report`, que ja resolvem a prioridade internamente (parametro
     > variavel de ambiente > `.env` > etapa pulada). Util pra quem prefere
     informar a chave direto na chamada em vez de configurar `.env`.
+
+    `browser_opener`: chamado com o caminho do relatorio HTML assim que ele
+    fica pronto, pra abri-lo automaticamente (ver `open_report_in_browser`).
+    Injetavel de proposito, mesmo padrao de `r_runner`/`eco_runner` -- os
+    testes passam um no-op pra nunca abrir um navegador de verdade. Uma
+    falha aqui (ex. sem display disponivel) nunca invalida a execucao ja
+    concluida, so fica registrada como aviso no stdout.
     """
     input_csv = Path(input_csv)
     config_path = Path(config_path) if config_path else None
@@ -418,7 +451,7 @@ def run(
         return result
 
     if output_csv is None:
-        output_csv = run_dir(runs_dir, run_id) / "output_pos_curadoria_LLM.csv"
+        output_csv = run_dir(runs_dir, run_id) / f"{run_id}_output_pos_curadoria_LLM.csv"
     output_csv = Path(output_csv)
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
@@ -600,7 +633,7 @@ def run(
 
     report_path = None
     if report_text is not None:
-        report_file = run_dir(runs_dir, run_id) / "relatorio.pdf"
+        report_file = run_dir(runs_dir, run_id) / f"{run_id}_relatorio.pdf"
         report_file.parent.mkdir(parents=True, exist_ok=True)
         try:
             subtitle_parts = [
@@ -674,13 +707,22 @@ def run(
                 "ecologia_requested": True,
             }
             html_text = build_html_report(html_context)
-            html_file = run_dir(runs_dir, run_id) / "report.html"
+            html_file = run_dir(runs_dir, run_id) / f"{run_id}_report.html"
             html_file.write_text(html_text, encoding="utf-8")
             html_report_path = str(html_file)
         except Exception:
             # Mesma logica de protecao das etapas acima: uma falha aqui nao
             # invalida a curadoria (e a analise ecologica) ja concluidas.
             html_report_path = None
+
+    if html_report_path is not None:
+        try:
+            browser_opener(Path(html_report_path))
+        except Exception as exc:
+            # Abrir o navegador e so uma conveniencia -- uma falha aqui (ex.
+            # sem display disponivel, execucao remota) nunca invalida nada
+            # ja concluido.
+            print(f"Nao foi possivel abrir o relatorio automaticamente no navegador: {exc}")
 
     result = RunResult(
         status=status,
@@ -755,6 +797,7 @@ def run_ecologia_somente(
     rscript_exe: Optional[str] = None,
     timeout: int = 1800,
     eco_runner: EcoRunner = default_eco_runner,
+    browser_opener: BrowserOpener = open_report_in_browser,
 ) -> RunResult:
     """Roda so a analise ecologica sobre um CSV ja curado por uma execucao
     anterior (opcionalmente revisado a mao), sem refazer nenhuma etapa de
@@ -763,7 +806,7 @@ def run_ecologia_somente(
     como subprocesso, reaproveitando o mesmo `eco_runner` que a flag
     `--ecologia` de `run()` ja usa internamente.
 
-    Grava `runs/<run_id>/log.json` no mesmo formato dos outros logs, com
+    Grava `runs/<run_id>/<run_id>_log.json` no mesmo formato dos outros logs, com
     `tipo_execucao="ecologia_somente"`.
     """
     curado_csv_path = Path(curado_csv_path)
@@ -872,13 +915,19 @@ def run_ecologia_somente(
                 "ecologia_requested": True,
             }
             html_text = build_html_report(html_context)
-            html_file = run_dir(runs_dir, run_id) / "report.html"
+            html_file = run_dir(runs_dir, run_id) / f"{run_id}_report.html"
             html_file.write_text(html_text, encoding="utf-8")
             html_report_path = str(html_file)
         except Exception:
             # Mesma logica de protecao do resto do modulo: uma falha aqui
             # nao invalida a analise ecologica ja concluida.
             html_report_path = None
+
+    if html_report_path is not None:
+        try:
+            browser_opener(Path(html_report_path))
+        except Exception as exc:
+            print(f"Nao foi possivel abrir o relatorio automaticamente no navegador: {exc}")
 
     result = RunResult(
         status=status,

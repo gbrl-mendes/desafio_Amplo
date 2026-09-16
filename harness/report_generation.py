@@ -2,7 +2,7 @@
 por LLM, que sintetiza os resultados de uma execucao (curadoria
 deterministica + assistida) num relatorio tecnico em markdown. Esse
 markdown e depois renderizado como PDF por `harness/pdf_report.py`
-(`runs/<run_id>/relatorio.pdf`), a entrega final gravada na mesma pasta do
+(`runs/<run_id>/<run_id>_relatorio.pdf`), a entrega final gravada na mesma pasta do
 log JSON de cada run.
 
 Mesma disciplina de evidencia da curadoria assistida (llm_curation.py): o

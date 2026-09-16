@@ -46,6 +46,16 @@
     border-bottom: 1px solid rgba(255, 255, 255, .25); margin-bottom: .5rem;
   }
   .sidebar .brand small { display: block; font-weight: 400; opacity: .75; font-size: .75rem; margin-top: .3rem; }
+  /* Botao de acao (abre a pasta desta execucao numa aba nova) -- estilo de
+     pilula, visualmente diferente dos links de navegacao abaixo (que so
+     rolam a pagina) porque faz algo categoricamente diferente. */
+  .sidebar .open-folder-link {
+    display: flex; align-items: center; gap: .4rem; margin: 1rem 1.5rem 1.25rem;
+    padding: .5rem .9rem; border: 1px solid rgba(255, 255, 255, .4); border-radius: 999px;
+    color: #fff; text-decoration: none; font-size: .82rem; font-weight: 600;
+    background: rgba(255, 255, 255, .08);
+  }
+  .sidebar .open-folder-link:hover { background: rgba(255, 255, 255, .2); }
   .sidebar nav a {
     display: block; padding: .6rem 1.5rem; color: rgba(255, 255, 255, .85);
     text-decoration: none; font-size: .86rem; border-left: 3px solid transparent;
@@ -146,6 +156,14 @@
     desafio_Amplo
     <small>{{ "Somente análise ecológica" if is_somente else "Execução completa" }}</small>
   </div>
+  {#- Link relativo (".") -- aponta pra pasta que contem este proprio
+      arquivo HTML, ou seja, a pasta desta execucao (runs/<run_id>/), onde
+      moram o CSV final, o PDF e a pasta ecologia/. Sem caminho absoluto de
+      proposito: continua correto mesmo se a pasta for copiada/movida.
+      target="_blank" abre numa aba nova, sem perder o lugar no relatorio. #}
+  <a class="open-folder-link" href="." target="_blank" rel="noopener" title="Abrir a pasta desta execução (CSV, PDF, gráficos)">
+    📁 Abrir pasta desta execução
+  </a>
   <nav>
     {% for anchor, title in sections %}
     <a href="#{{ anchor }}" data-nav-target="{{ anchor }}">{{ title }}</a>
