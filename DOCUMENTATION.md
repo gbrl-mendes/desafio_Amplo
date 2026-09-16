@@ -246,5 +246,3 @@ Rscript r/tests/run_tests.R
 ## Contato
 
 Para mais informações, entre em contato comigo através do meu endereço de [e-mail](mailto:gabrielmendesbrt@outlook.com) 😊
-
-
