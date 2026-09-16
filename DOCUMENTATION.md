@@ -42,7 +42,7 @@ bash setup.sh
 ## Execução
 
 ```bash
-python -m harness <entrada.csv> [--config config.yaml] [--output output_pos_curadoria_LLM.csv] [--runs-dir runs/] [--llm-mode live|mock|off] [--reference spp_tradicional.csv] [--ecologia] [--groq-api-key chave]
+.venv\Scripts\python.exe -m harness <entrada.csv> [--config config.yaml] [--output output_pos_curadoria_LLM.csv] [--runs-dir runs/] [--llm-mode live|mock|off] [--reference spp_tradicional.csv] [--ecologia] [--groq-api-key chave]
 ```
 
 - `<entrada.csv>`: obrigatório, a menos que `--ecologia-somente` seja usado no lugar. Schema completo em [`data/reference/asv_input_schema.yaml`](data/reference/asv_input_schema.yaml).
@@ -80,7 +80,7 @@ Código de saída do processo: `0` sucesso, `2` entrada recusada pela validaçã
 - **Primeiro exemplo: peixes, eDNA de água**
 
 ```bash
-python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --groq-api-key <chave>
 ```
 
 O dado de demonstração é um subset randomizado de 50 sequências (80 linhas, sequência × amostra) do projeto eDNA_Cipo, reduzido para manter o consumo de cota de API e o tempo de execução baixos. Sem `--output`, grava tudo em `runs/<run_id>/`: o CSV final (`output_pos_curadoria_LLM.csv`), o log (`log.json`) e um relatório narrativo em PDF, tema Cayman (`relatorio.pdf`).
@@ -88,7 +88,7 @@ O dado de demonstração é um subset randomizado de 50 sequências (80 linhas, 
 - **Uso com referência de amostragens tradicionais**
 
 ```bash
-python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv --groq-api-key <chave>
 ```
 
 Mesma execução, mas a curadoria assistida também considera, por ponto de coleta, as espécies já registradas por métodos tradicionais na tabela de `--reference`.
@@ -96,7 +96,7 @@ Mesma execução, mas a curadoria assistida também considera, por ponto de cole
 - **Segundo exemplo: plantas, metabarcoding de raízes**
 
 ```bash
-python -m harness data/example/exemplo_2/dasafio_Amplo-roots_metabar_subset_output-2026-09-15.csv --reference data/example/exemplo_2/roots_metabar_spp_tradicional.csv --config data/example/exemplo_2/config.yaml --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness data/example/exemplo_2/dasafio_Amplo-roots_metabar_subset_output-2026-09-15.csv --reference data/example/exemplo_2/roots_metabar_spp_tradicional.csv --config data/example/exemplo_2/config.yaml --groq-api-key <chave>
 ```
 
 Segundo dado de demonstração, do projeto `roots_metabar` (raízes, primer ITS2, plantas), de domínio taxonômico e origem diferentes do primeiro. Não tem dados de latitude/longitude, então a checagem regional por GBIF é pulada. O `--config` aponta o grupo taxonômico alvo para `Plantae` e mapeia o nome de coluna de controle próprio deste dataset (`PCR control`) para o nome interno esperado.
@@ -104,7 +104,7 @@ Segundo dado de demonstração, do projeto `roots_metabar` (raízes, primer ITS2
 - **Com análise ecológica na mesma execução**
 
 ```bash
-python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia --groq-api-key <chave>
 ```
 
 Mesma execução do primeiro exemplo, mas com `--ecologia`: além do CSV curado, grava riqueza/diversidade por ponto, curva de acumulação, dissimilaridade entre pontos, composição taxonômica e a comparação eDNA × tradicional em `runs/<run_id>/ecologia/`, mais um relatório HTML único (`runs/<run_id>/report.html`) reunindo entrada, cada etapa do determinístico, resultado da LLM e os gráficos ecológicos interativos (ver "Relatório HTML" abaixo).
@@ -112,7 +112,7 @@ Mesma execução do primeiro exemplo, mas com `--ecologia`: além do CSV curado,
 - **Análise ecológica separada, sobre um CSV revisado à mão**
 
 ```bash
-python -m harness --ecologia-somente runs/20260915-153000/output_pos_curadoria_LLM.csv --reference data/example/exemplo_1/spp_tradicional.csv --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness --ecologia-somente runs/20260915-153000/output_pos_curadoria_LLM.csv --reference data/example/exemplo_1/spp_tradicional.csv --groq-api-key <chave>
 ```
 
 Depois de revisar `Curated ID` manualmente num CSV já curado por uma execução anterior, roda só a análise ecológica sobre essa versão revisada, sem refazer a curadoria. Gera seu próprio log e seu próprio relatório HTML, mais enxuto (sem tabela de entrada nem resumos do determinístico, já que essa execução não rodou essas etapas, ver "Relatório HTML").
@@ -131,7 +131,7 @@ O relatório sempre descreve só o que aquela execução específica fez, nunca 
 A curadoria assistida e o relatório narrativo usam o modelo LLM Groq. Para que funcione, é necessário fornecer uma api-key com `--groq-api-key`:
 
 ```bash
-python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --groq-api-key <chave>
 ```
 
 A chave será fornecida por e-mail, uma vez que não pode ser disponibilizada em repositórios públicos como o GitHub, sob risco de cancelamento.
@@ -234,7 +234,7 @@ Entrada e saída são ambos CSV delimitado por `;`, decimal `,`, UTF-8, com aspa
 Camada Python (`harness/`):
 
 ```bash
-pytest tests/ -v
+.venv\Scripts\python.exe -m pytest tests/ -v
 ```
 
 Camada R (`r/curadoria_deterministica.R`, ex. o retry do `gbif_regional_count` em limite de taxa do GBIF):
@@ -246,3 +246,5 @@ Rscript r/tests/run_tests.R
 ## Contato
 
 Para mais informações, entre em contato comigo através do meu endereço de [e-mail](mailto:gabrielmendesbrt@outlook.com) 😊
+
+

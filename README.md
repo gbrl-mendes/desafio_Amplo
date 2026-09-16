@@ -32,7 +32,7 @@ bash setup.sh
 ## Execução
 
 ```bash
-python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --groq-api-key <chave>
+.venv\Scripts\python.exe -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --groq-api-key <chave>
 ```
 
 Isso roda a curadoria completa sobre o dado de demonstração  e grava tudo em `runs/<run_id>/`: o CSV final, o log da execução, e o relatório narrativo em PDF.
@@ -46,7 +46,7 @@ Código de saída do processo: `0` sucesso, `2` entrada recusada pela validaçã
 Camada Python (`harness/`):
 
 ```bash
-pytest tests/ -v
+.venv\Scripts\python.exe -m pytest tests/ -v
 ```
 
 Camada R (`r/curadoria_deterministica.R`):
