@@ -349,6 +349,24 @@ save_interactive_plot <- function(plot, path) {
 }
 
 run_ecological_analysis <- function(input_path, config_path = NULL, reference_path = NULL, output_dir) {
+  # ggplot2::ggsave() e plotly::ggplotly()/htmlwidgets::saveWidget() (usados
+  # abaixo) podem disparar a abertura implicita do dispositivo grafico
+  # padrao do R -- numa sessao nao-interativa via Rscript, isso significa um
+  # arquivo "Rplots.pdf" na pasta de trabalho (aqui, a raiz do repo, ver
+  # setwd(REPO_ROOT) no topo deste arquivo), mesmo sem nenhum plot() nosso
+  # sendo chamado diretamente. Abrir de antemao um dispositivo PDF proprio,
+  # redirecionado pra um arquivo descartavel no diretorio temporario do SO,
+  # evita que esse arquivo apareca no projeto.
+  null_pdf <- file.path(tempdir(), "analise_ecologica_null_device.pdf")
+  grDevices::pdf(null_pdf)
+  on.exit(
+    {
+      grDevices::dev.off()
+      unlink(null_pdf)
+    },
+    add = TRUE
+  )
+
   eco_config <- load_eco_config(config_path)$ecologia
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 

@@ -15,6 +15,7 @@ do determinístico; `--llm-mode=off` nao tem relatorio narrativo).
 from __future__ import annotations
 
 import base64
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -84,6 +85,21 @@ def _metadata_summary(df: Optional[pd.DataFrame]) -> Optional[dict]:
     return summary
 
 
+def _format_datetime(iso_text: Optional[str]) -> Optional[str]:
+    """`started_at`/`finished_at` chegam como datetime ISO 8601 completo
+    (ex. "2026-09-16T04:18:51.546069+00:00") -- exibir isso cru na tela nao
+    ajuda ninguem; formata pro padrao brasileiro, sem microssegundos, com o
+    fuso horario por extenso (sempre UTC, ver `datetime.now(timezone.utc)`
+    em orchestrator.py)."""
+    if not iso_text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(iso_text)
+    except ValueError:
+        return iso_text
+    return parsed.strftime("%d/%m/%Y %H:%M:%S UTC")
+
+
 def _render_markdown(text: Optional[str]) -> Optional[Markup]:
     """Converte o relatorio narrativo (markdown) pro HTML renderizado --
     sem isso, o texto aparece na pagina com a sintaxe markdown literal
@@ -142,25 +158,32 @@ def build_html_report(context: dict) -> str:
     final_df = context.get("final_df")
 
     return template.render(
-        datatables_css=_read_asset("dataTables.dataTables.min.css"),
-        jquery_js=_read_asset("jquery.min.js"),
-        datatables_js=_read_asset("dataTables.min.js"),
+        # Markup(): com autoescape=True, {{ }} escaparia estes assets como se
+        # fossem texto comum (ex. "&&" vira "&amp;&amp;" dentro do <script>),
+        # corrompendo o JS/CSS vendorizado -- bug real encontrado nesta sessao,
+        # o jQuery/DataTables nunca chegava a rodar de fato (SyntaxError no
+        # console), entao nenhuma tabela tinha a interatividade/estilo do
+        # DataTables. Seguro marcar como confiavel: sao arquivos vendorizados
+        # localmente (harness/assets/), nunca conteudo de terceiros/usuario.
+        datatables_css=Markup(_read_asset("dataTables.dataTables.min.css")),
+        jquery_js=Markup(_read_asset("jquery.min.js")),
+        datatables_js=Markup(_read_asset("dataTables.min.js")),
         tipo_execucao=tipo_execucao,
         is_somente=tipo_execucao == "ecologia_somente",
-        started_at=context.get("started_at"),
-        finished_at=context.get("finished_at"),
+        started_at=_format_datetime(context.get("started_at")),
+        finished_at=_format_datetime(context.get("finished_at")),
         researcher=context.get("researcher"),
         project=context.get("project"),
         primer=context.get("primer"),
         metadata_summary=_metadata_summary(input_df if input_df is not None else final_df),
-        input_table=_dataframe_to_table(input_df, "tabela-entrada"),
+        input_table=_dataframe_to_table(input_df, "dt-tabela-entrada"),
         diagnostics=context.get("diagnostics"),
-        deterministic_table=_dataframe_to_table(context.get("deterministic_df"), "tabela-deterministica"),
+        deterministic_table=_dataframe_to_table(context.get("deterministic_df"), "dt-tabela-deterministica"),
         report_html=_render_markdown(context.get("report_text")),
         llm_divergence_examples=context.get("llm_divergence_examples") or [],
         llm_reviewed_count=context.get("llm_reviewed_count"),
         llm_total_unique_asvs=context.get("llm_total_unique_asvs"),
-        final_table=_dataframe_to_table(final_df, "tabela-final"),
+        final_table=_dataframe_to_table(final_df, "dt-tabela-final"),
         ecologia_plots=_ecologia_plots(context.get("ecologia_output_dir")),
         ecologia_requested=bool(context.get("ecologia_requested")),
     )

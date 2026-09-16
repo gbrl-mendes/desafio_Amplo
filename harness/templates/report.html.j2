@@ -5,34 +5,102 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Relatório de execução — desafio_Amplo</title>
 <style>
-  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; color: #1a1a1a; background: #f5f6f8; }
-  header { background: #1f2d3d; color: #fff; padding: 1.5rem 2rem; }
-  header h1 { margin: 0 0 .3rem; font-size: 1.4rem; }
-  header .meta { opacity: .85; font-size: .9rem; }
-  main { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.5rem 4rem; }
-  section { background: #fff; border: 1px solid #e2e2e2; border-radius: 6px; padding: 1.25rem 1.5rem; margin-bottom: 1.5rem; }
-  section h2 { margin-top: 0; font-size: 1.15rem; border-bottom: 1px solid #eee; padding-bottom: .5rem; }
-  .warning-banner { background: #fff3cd; border: 1px solid #ffe69c; color: #664d03; padding: 1rem 1.5rem; border-radius: 6px; margin-bottom: 1.5rem; }
+  /* Paleta e tipografia derivadas do tema "Cayman" (prettydoc) usado no
+     relatorio em PDF (ver harness/pdf_report.py) -- mesma identidade visual
+     nos dois formatos. Sem link pro Google Fonts aqui: diferente do PDF
+     (gerado uma vez, com internet disponivel), este HTML precisa continuar
+     abrindo e funcionando sem internet depois de pronto -- ver docstring
+     deste modulo. */
+  :root {
+    --cayman-blue: #155799;
+    --cayman-green: #159957;
+    --text: #606c71;
+    --text-strong: #1a1a1a;
+    --border: #e9ebec;
+    --stripe: #f2f4f7;
+    --sidebar-width: 260px;
+  }
+  * { box-sizing: border-box; }
+  /* CSS vendorizado do DataTables carregado ANTES das nossas regras de
+     tabela (mais abaixo) de proposito: elas precisam vencer no cascade
+     (mesma especificidade, ordem decide) pra sobrescrever o cabecalho
+     padrao do DataTables com as cores do tema. */
+  {{ datatables_css }}
+  body {
+    margin: 0; color: var(--text); background: #fff;
+    font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+  }
+  a { color: var(--cayman-blue); }
+
+  /* --- Navegacao lateral, estilo MultiQC: titulos de cada secao, clicar
+     leva ate ela (ancora comum); destaca a secao visivel no momento via
+     IntersectionObserver (ver script no fim do body). --- */
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; width: var(--sidebar-width);
+    background-image: linear-gradient(160deg, var(--cayman-blue), var(--cayman-green));
+    color: #fff; overflow-y: auto; z-index: 10;
+  }
+  .sidebar .brand {
+    padding: 1.5rem 1.5rem 1rem; font-size: 1.05rem; font-weight: 700;
+    border-bottom: 1px solid rgba(255, 255, 255, .25); margin-bottom: .5rem;
+  }
+  .sidebar .brand small { display: block; font-weight: 400; opacity: .75; font-size: .75rem; margin-top: .3rem; }
+  .sidebar nav a {
+    display: block; padding: .6rem 1.5rem; color: rgba(255, 255, 255, .85);
+    text-decoration: none; font-size: .86rem; border-left: 3px solid transparent;
+  }
+  .sidebar nav a:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+  .sidebar nav a.active { background: rgba(255, 255, 255, .16); border-left-color: #fff; color: #fff; font-weight: 600; }
+
+  .main-content { margin-left: var(--sidebar-width); max-width: 1400px; padding-bottom: 4rem; }
+
+  .page-header {
+    color: #fff; text-align: center; background-color: var(--cayman-green);
+    background-image: linear-gradient(120deg, var(--cayman-blue), var(--cayman-green));
+    padding: 2rem 2rem 1.75rem;
+  }
+  .page-header h1 { margin: 0 0 .3rem; font-size: 1.6rem; font-weight: 400; }
+  .page-header .meta { opacity: .85; font-size: .95rem; }
+
+  section { padding: 1.5rem 2.5rem; border-bottom: 1px solid var(--border); scroll-margin-top: 1rem; }
+  section h2 { margin-top: 0; font-size: 1.25rem; font-weight: 400; color: var(--cayman-green); }
+  .warning-banner { background: #fff3cd; border: 1px solid #ffe69c; color: #664d03; padding: 1rem 1.5rem; margin: 1.5rem 2.5rem 0; border-radius: 6px; }
   .stage-block { margin-bottom: 1.25rem; }
-  .stage-block h3 { margin-bottom: .35rem; font-size: 1rem; }
+  .stage-block h3 { margin-bottom: .35rem; font-size: 1rem; color: var(--text-strong); }
   .stage-block dl { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 0; font-size: .9rem; }
   .stage-block dt { font-weight: 600; color: #444; }
   .stage-block dd { margin: 0; }
   .empty-note { color: #888; font-style: italic; }
   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; }
-  .summary-grid .stat { background: #f2f4f7; border-radius: 6px; padding: .75rem 1rem; }
-  .summary-grid .stat .value { font-size: 1.4rem; font-weight: 700; }
+  .summary-grid .stat { background: var(--stripe); border-radius: 6px; padding: .75rem 1rem; }
+  .summary-grid .stat .value { font-size: 1.4rem; font-weight: 700; color: var(--text-strong); }
   .summary-grid .stat .label { font-size: .8rem; color: #666; }
   .flags { margin-top: .75rem; font-size: .85rem; color: #555; }
-  .divergence-case { border-left: 3px solid #c9a227; padding-left: .75rem; margin-bottom: .75rem; font-size: .9rem; }
-  iframe.plot-frame { width: 100%; height: 520px; border: 1px solid #e2e2e2; border-radius: 6px; }
+  .divergence-case { border-left: 3px solid var(--cayman-green); padding-left: .75rem; margin-bottom: .75rem; font-size: .9rem; }
+  iframe.plot-frame { width: 100%; height: 520px; border: 1px solid var(--border); border-radius: 6px; }
+
+  /* --- Tabelas: a pedido explicito, largura sempre limitada a do
+     container (nunca estoura a pagina) e com sua PROPRIA barra de rolagem
+     horizontal quando o conteudo e mais largo -- DataTables faz isso
+     nativamente via scrollX (ver script de inicializacao abaixo). --- */
+  .table-scroll { max-width: 100%; margin: 1rem 0; }
   table.dataTable { width: 100% !important; font-size: .82rem; }
-  .narrative { line-height: 1.5; font-size: .92rem; }
-  .narrative h1, .narrative h2, .narrative h3 { font-size: 1rem; margin: .9rem 0 .3rem; }
+  table.dataTable thead th { background: var(--cayman-green); color: #fff; }
+  .dt-scroll-head { background: var(--cayman-green); }
+
+  .narrative { line-height: 1.6; font-size: .95rem; }
+  .narrative h1, .narrative h2, .narrative h3 { font-size: 1.05rem; margin: 1rem 0 .4rem; color: var(--cayman-green); font-weight: 600; }
   .narrative table { border-collapse: collapse; margin: .5rem 0; }
-  .narrative th, .narrative td { border: 1px solid #ddd; padding: .3rem .6rem; }
-  .narrative code { background: #f2f4f7; padding: .1rem .3rem; border-radius: 3px; font-size: .85em; }
-  {{ datatables_css }}
+  .narrative th, .narrative td { border: 1px solid var(--border); padding: .3rem .6rem; }
+  .narrative code { background: var(--stripe); padding: .1rem .3rem; border-radius: 3px; font-size: .85em; }
+
+  @media (max-width: 860px) {
+    .sidebar { position: static; width: 100%; height: auto; }
+    .main-content { margin-left: 0; }
+    section { padding: 1.25rem 1.25rem; }
+    .page-header { padding: 1.5rem 1.25rem; }
+  }
 </style>
 <script>{{ jquery_js }}</script>
 <script>{{ datatables_js }}</script>
@@ -41,39 +109,68 @@
 
 {% macro render_table(table) %}
 {% if table %}
-<table id="{{ table.id }}" class="display" style="width:100%">
-  <thead><tr>{% for col in table.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
-  <tbody>
-    {% for row in table.rows %}
-    <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
-    {% endfor %}
-  </tbody>
-</table>
-<script>$(function () { $('#{{ table.id }}').DataTable(); });</script>
+<div class="table-scroll">
+  <table id="{{ table.id }}" class="display" style="width:100%">
+    <thead><tr>{% for col in table.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% for row in table.rows %}
+      <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<script>$(function () { $('#{{ table.id }}').DataTable({ scrollX: true, scrollCollapse: true }); });</script>
 {% else %}
 <p class="empty-note">Seção não disponível.</p>
 {% endif %}
 {% endmacro %}
 
-<header>
-  <h1>Relatório de execução — desafio_Amplo</h1>
-  <div class="meta">
-    {% if researcher %}{{ researcher }}{% endif %}
-    {% if project %} &middot; {{ project }}{% endif %}
-    {% if primer %} &middot; primer {{ primer }}{% endif %}
-    {% if started_at %} &middot; {{ started_at }}{% endif %}
-    &middot; {{ "Somente análise ecológica" if is_somente else "Execução completa" }}
-  </div>
-</header>
+{#- Secoes realmente renderizadas nesta execucao -- usado tanto pra montar
+    a navegacao lateral quanto pros ids usados pelas ancoras/scrollspy,
+    seguindo exatamente os mesmos "if" que decidem o que aparece abaixo. -#}
+{% set sections = [] %}
+{% set _ = sections.append(("resumo-geral", "Resumo geral")) %}
+{% if not is_somente %}
+  {% set _ = sections.append(("tabela-entrada", "Tabela de entrada bruta")) %}
+  {% set _ = sections.append(("curadoria-deterministica", "Curadoria determinística")) %}
+  {% set _ = sections.append(("tabela-deterministica", "Saída determinística")) %}
+  {% set _ = sections.append(("curadoria-llm", "Curadoria assistida por LLM")) %}
+{% endif %}
+{% set _ = sections.append(("tabela-final", "Tabela final")) %}
+{% if ecologia_plots or ecologia_requested %}
+  {% set _ = sections.append(("analise-ecologica", "Análise ecológica")) %}
+{% endif %}
 
-<main>
+<aside class="sidebar">
+  <div class="brand">
+    desafio_Amplo
+    <small>{{ "Somente análise ecológica" if is_somente else "Execução completa" }}</small>
+  </div>
+  <nav>
+    {% for anchor, title in sections %}
+    <a href="#{{ anchor }}" data-nav-target="{{ anchor }}">{{ title }}</a>
+    {% endfor %}
+  </nav>
+</aside>
+
+<div class="main-content">
+  <div class="page-header">
+    <h1>Relatório de execução</h1>
+    <div class="meta">
+      {% if researcher %}{{ researcher }}{% endif %}
+      {% if project %} &middot; {{ project }}{% endif %}
+      {% if primer %} &middot; primer {{ primer }}{% endif %}
+      {% if started_at %} &middot; {{ started_at }}{% endif %}
+    </div>
+  </div>
+
   {% if is_somente %}
   <div class="warning-banner">
     Esta análise partiu de um CSV já curado por uma execução anterior, possivelmente revisado à mão, fora de uma execução completa desta vez — as seções de entrada bruta e de resumo da curadoria determinística não se aplicam aqui.
   </div>
   {% endif %}
 
-  <section>
+  <section id="resumo-geral">
     <h2>Resumo geral</h2>
     {% if metadata_summary %}
     <div class="summary-grid">
@@ -94,13 +191,13 @@
   </section>
 
   {% if not is_somente %}
-  <section>
+  <section id="tabela-entrada">
     <h2>Tabela de entrada bruta</h2>
     {{ render_table(input_table) }}
   </section>
 
-  <section>
-    <h2>Resumo da curadoria determinística</h2>
+  <section id="curadoria-deterministica">
+    <h2>Curadoria determinística</h2>
     {% if diagnostics %}
       {% if diagnostics.refinamento_hits %}
       <div class="stage-block">
@@ -148,12 +245,12 @@
     {% endif %}
   </section>
 
-  <section>
+  <section id="tabela-deterministica">
     <h2>Tabela de saída determinística (antes da curadoria assistida)</h2>
     {{ render_table(deterministic_table) }}
   </section>
 
-  <section>
+  <section id="curadoria-llm">
     <h2>Curadoria assistida por LLM</h2>
     {% if report_html %}
       <div class="narrative">{{ report_html }}</div>
@@ -175,13 +272,13 @@
   </section>
   {% endif %}
 
-  <section>
+  <section id="tabela-final">
     <h2>Tabela final</h2>
     {{ render_table(final_table) }}
   </section>
 
   {% if ecologia_plots %}
-  <section>
+  <section id="analise-ecologica">
     <h2>Análise ecológica</h2>
     {% for plot in ecologia_plots %}
     <div class="stage-block">
@@ -189,17 +286,45 @@
       {% if plot.kind == "html" %}
         <iframe class="plot-frame" srcdoc="{{ plot.content }}"></iframe>
       {% else %}
-        <img src="{{ plot.content }}" style="max-width:100%; border:1px solid #e2e2e2; border-radius:6px;">
+        <img src="{{ plot.content }}" style="max-width:100%; border:1px solid var(--border); border-radius:6px;">
       {% endif %}
     </div>
     {% endfor %}
   </section>
   {% elif ecologia_requested %}
-  <section>
+  <section id="analise-ecologica">
     <h2>Análise ecológica</h2>
     <p class="empty-note">Seção não disponível.</p>
   </section>
   {% endif %}
-</main>
+</div>
+
+<script>
+// Scrollspy simples, estilo MultiQC: destaca na navegacao lateral a secao
+// visivel no momento, sem nenhuma biblioteca externa.
+(function () {
+  var links = document.querySelectorAll(".sidebar nav a[data-nav-target]");
+  if (!links.length || !("IntersectionObserver" in window)) return;
+
+  var linkByTarget = {};
+  links.forEach(function (link) { linkByTarget[link.getAttribute("data-nav-target")] = link; });
+
+  var observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      var link = linkByTarget[entry.target.id];
+      if (!link) return;
+      if (entry.isIntersecting) {
+        links.forEach(function (l) { l.classList.remove("active"); });
+        link.classList.add("active");
+      }
+    });
+  }, { rootMargin: "-15% 0px -70% 0px" });
+
+  Object.keys(linkByTarget).forEach(function (id) {
+    var section = document.getElementById(id);
+    if (section) observer.observe(section);
+  });
+})();
+</script>
 </body>
 </html>

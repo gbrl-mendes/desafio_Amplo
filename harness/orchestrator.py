@@ -23,17 +23,20 @@ Fluxo: resumo da entrada -> valida -> (recusa se bloqueante) -> roda o R
 (saida ao vivo) -> verifica a saida -> checkpoint (metricas + pergunta se ha
 custo real de LLM em jogo) -> curadoria assistida por LLM (opcional) ->
 relatorio narrativo (opcional) -> loga. Cada etapa gera um "RunResult"
-serializavel, gravado num unico `runs/<run_id>.json` por execucao (`run_id`
-curto, ex. `20260916-004104` -- ver `_make_run_id`). Esse arquivo e gravado
-duas vezes numa execucao bem-sucedida: uma vez em
+serializavel, gravado num unico `runs/<run_id>/log.json` por execucao
+(`run_id` curto, ex. `20260916-004104` -- ver `_make_run_id`). Esse arquivo
+e gravado duas vezes numa execucao bem-sucedida: uma vez em
 `status="aguardando_confirmacao_llm"`, logo apos ler o diagnostico do R e
 antes de perguntar se vale a pena prosseguir pra curadoria assistida (assim
 sobra um registro em disco do que foi decidido ate ali mesmo se o processo
 travar ou for encerrado no meio de uma etapa longa e sujeita a rate limit),
 e de novo no final com o conteudo completo -- sem precisar de arquivos
 `_checkpoint.json`/`_diagnostics.json` separados, cujo conteudo se
-sobrepunha bastante ao do log principal. Relatorio narrativo em
-`runs/<run_id>_relatorio.pdf`.
+sobrepunha bastante ao do log principal. Todo artefato de uma execucao (log,
+CSV de saida quando nao especificado por `--output`, relatorio em
+`runs/<run_id>/relatorio.pdf`, relatorio HTML, pasta `ecologia/`) fica dentro
+dessa mesma pasta `runs/<run_id>/`, em vez de solto direto em `runs/` --
+ver `run_dir()`.
 """
 
 from __future__ import annotations
@@ -284,16 +287,26 @@ def verify_output(output_path: Path, expected_row_count: int) -> list[str]:
     return issues
 
 
+def run_dir(runs_dir: Path, run_id: str) -> Path:
+    """Pasta de uma execucao especifica, `runs/<run_id>/` -- todos os
+    artefatos de uma mesma execucao (log, CSV de saida quando nao
+    especificado por `--output`, relatorio em PDF, relatorio HTML, pasta da
+    analise ecologica) moram juntos ali, em vez de espalhados soltos direto
+    em `runs/`."""
+    return runs_dir / run_id
+
+
 def write_run_log(result: RunResult, runs_dir: Path, run_id: str) -> Path:
-    """Grava (ou sobrescreve) `runs/<run_id>.json`. Chamada mais de uma vez
-    pro mesmo `run_id` durante uma execucao bem-sucedida (ver `run()`): uma
-    vez em `status="aguardando_confirmacao_llm"`, com o que ja se sabe antes
-    de perguntar sobre a curadoria assistida, e de novo no final com o
+    """Grava (ou sobrescreve) `runs/<run_id>/log.json`. Chamada mais de uma
+    vez pro mesmo `run_id` durante uma execucao bem-sucedida (ver `run()`):
+    uma vez em `status="aguardando_confirmacao_llm"`, com o que ja se sabe
+    antes de perguntar sobre a curadoria assistida, e de novo no final com o
     conteudo completo -- assim ainda sobra um registro em disco do que foi
     decidido ate ali se o processo travar ou for encerrado no meio, sem
     precisar de um segundo arquivo so pra isso."""
-    runs_dir.mkdir(parents=True, exist_ok=True)
-    log_path = runs_dir / f"{run_id}.json"
+    target_dir = run_dir(runs_dir, run_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    log_path = target_dir / "log.json"
     log_path.write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
     return log_path
 
@@ -365,7 +378,7 @@ def run(
 
     `ecologia`: quando True, roda `r/analise_ecologica.R` sobre o CSV final
     (com `Curated ID` ja preenchida) logo apos a curadoria assistida, escrevendo
-    tabelas e graficos em `runs/<timestamp>_ecologia/`. Uma falha aqui nunca
+    tabelas e graficos em `runs/<run_id>/ecologia/`. Uma falha aqui nunca
     invalida a curadoria ja concluida e verificada, so fica registrada em
     `ecologia_error`. `eco_runner` e injetavel de proposito, mesmo padrao de
     `r_runner`.
@@ -405,8 +418,7 @@ def run(
         return result
 
     if output_csv is None:
-        run_date = started_at[:10]  # started_at e um ISO datetime, "YYYY-MM-DD..."
-        output_csv = runs_dir / f"output_pos_curadoria_LLM-{run_date}.csv"
+        output_csv = run_dir(runs_dir, run_id) / "output_pos_curadoria_LLM.csv"
     output_csv = Path(output_csv)
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
@@ -588,7 +600,7 @@ def run(
 
     report_path = None
     if report_text is not None:
-        report_file = runs_dir / f"{run_id}_relatorio.pdf"
+        report_file = run_dir(runs_dir, run_id) / "relatorio.pdf"
         report_file.parent.mkdir(parents=True, exist_ok=True)
         try:
             subtitle_parts = [
@@ -620,7 +632,7 @@ def run(
             ecologia_error = "Rscript nao encontrado -- analise ecologica pulada."
         else:
             try:
-                eco_dir = runs_dir / f"{run_id}_ecologia"
+                eco_dir = run_dir(runs_dir, run_id) / "ecologia"
                 print("\n=== Analise ecologica ===")
                 eco_proc = eco_runner(
                     eco_resolved_rscript,
@@ -662,7 +674,7 @@ def run(
                 "ecologia_requested": True,
             }
             html_text = build_html_report(html_context)
-            html_file = runs_dir / f"{run_id}_report.html"
+            html_file = run_dir(runs_dir, run_id) / "report.html"
             html_file.write_text(html_text, encoding="utf-8")
             html_report_path = str(html_file)
         except Exception:
@@ -751,7 +763,7 @@ def run_ecologia_somente(
     como subprocesso, reaproveitando o mesmo `eco_runner` que a flag
     `--ecologia` de `run()` ja usa internamente.
 
-    Grava `runs/<timestamp>.json` no mesmo formato dos outros logs, com
+    Grava `runs/<run_id>/log.json` no mesmo formato dos outros logs, com
     `tipo_execucao="ecologia_somente"`.
     """
     curado_csv_path = Path(curado_csv_path)
@@ -834,7 +846,7 @@ def run_ecologia_somente(
             "Instale R (https://www.r-project.org) ou aponte para o executavel."
         )
 
-    eco_dir = runs_dir / f"{run_id}_ecologia"
+    eco_dir = run_dir(runs_dir, run_id) / "ecologia"
     print("\n=== Analise ecologica (--ecologia-somente) ===")
     try:
         eco_proc = eco_runner(resolved_rscript, curado_csv_path, eco_dir, config_path, reference_path, timeout)
@@ -860,7 +872,7 @@ def run_ecologia_somente(
                 "ecologia_requested": True,
             }
             html_text = build_html_report(html_context)
-            html_file = runs_dir / f"{run_id}_report.html"
+            html_file = run_dir(runs_dir, run_id) / "report.html"
             html_file.write_text(html_text, encoding="utf-8")
             html_report_path = str(html_file)
         except Exception:

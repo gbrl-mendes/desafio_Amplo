@@ -69,12 +69,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         dest="output_csv",
         default=None,
-        help="Caminho do CSV de saida (default: runs/output_pos_curadoria_LLM-<AAAA-MM-DD>.csv).",
+        help="Caminho do CSV de saida (default: runs/<run_id>/output_pos_curadoria_LLM.csv).",
     )
     parser.add_argument(
         "--runs-dir",
         default=str(DEFAULT_RUNS_DIR),
-        help="Pasta onde gravar o log JSON de cada run (default: runs/).",
+        help="Pasta-base onde gravar os artefatos de cada run, um sub-pasta por run_id (default: runs/).",
     )
     parser.add_argument(
         "--llm-mode",

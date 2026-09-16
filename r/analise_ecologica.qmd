@@ -495,10 +495,20 @@ Os blocos estão organizados assim:
   }
   ```
 
-- **Rodar a análise inteira e exportar tabelas + gráficos.** Cada seção degrada graciosamente (pula com aviso) se faltar o dado que ela precisa -- nunca derruba as demais.
+- **Rodar a análise inteira e exportar tabelas + gráficos.** Cada seção degrada graciosamente (pula com aviso) se faltar o dado que ela precisa -- nunca derruba as demais. Abre um dispositivo gráfico PDF próprio, redirecionado pro diretório temporário do SO, antes de qualquer gráfico: `ggplot2::ggsave()` e `plotly::ggplotly()`/`htmlwidgets::saveWidget()` (usados abaixo) podem disparar a abertura implícita do dispositivo padrão do R, que numa sessão não-interativa via `Rscript` significa um arquivo `Rplots.pdf` na pasta de trabalho (a raiz do repo, por causa do `setwd(REPO_ROOT)` no topo deste arquivo) -- sem esse dispositivo próprio já aberto, esse arquivo indesejado aparece no projeto a cada execução.
 
   ```{r}
   run_ecological_analysis <- function(input_path, config_path = NULL, reference_path = NULL, output_dir) {
+    null_pdf <- file.path(tempdir(), "analise_ecologica_null_device.pdf")
+    grDevices::pdf(null_pdf)
+    on.exit(
+      {
+        grDevices::dev.off()
+        unlink(null_pdf)
+      },
+      add = TRUE
+    )
+
     eco_config <- load_eco_config(config_path)$ecologia
     dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 

@@ -75,7 +75,7 @@ def test_refused_when_missing_required_columns(tmp_path):
     assert result.status == "refused"
     assert any("missing_required_columns" in b for b in result.validation_blocking)
     assert result.output_path is None
-    assert list((tmp_path / "runs").glob("*.json"))
+    assert list((tmp_path / "runs").rglob("*.json"))
 
 
 def test_success_when_valid_input_and_r_succeeds(tmp_path):
@@ -113,8 +113,11 @@ def test_default_output_filename_when_output_not_given(tmp_path):
     )
 
     assert result.status == "success"
-    output_name = Path(result.output_path).name
-    assert re.fullmatch(r"output_pos_curadoria_LLM-\d{4}-\d{2}-\d{2}\.csv", output_name), output_name
+    output_path = Path(result.output_path)
+    assert output_path.name == "output_pos_curadoria_LLM.csv"
+    # Dentro da pasta da propria execucao (runs/<run_id>/...), nao solto em runs/.
+    assert output_path.parent.parent == runs_dir
+    assert re.fullmatch(r"\d{8}-\d{6}", output_path.parent.name)
 
 
 def test_refused_when_required_column_renamed_without_alias_config(tmp_path):
@@ -209,8 +212,6 @@ def test_diagnostics_bridge_file_absorbed_and_deleted(tmp_path):
 
 
 def test_run_id_is_short_and_sortable(tmp_path):
-    import re
-
     runs_dir = tmp_path / "runs"
     result = run(
         _write_valid_input(tmp_path),
@@ -221,9 +222,9 @@ def test_run_id_is_short_and_sortable(tmp_path):
     )
 
     assert result.status == "success"
-    log_files = list(runs_dir.glob("*.json"))
+    log_files = list(runs_dir.rglob("log.json"))
     assert len(log_files) == 1  # um so arquivo de log por execucao, nao mais checkpoint/diagnostics separados
-    assert re.fullmatch(r"\d{8}-\d{6}\.json", log_files[0].name)
+    assert re.fullmatch(r"\d{8}-\d{6}", log_files[0].parent.name)
 
 
 def test_run_log_written_progressively_before_and_after_llm_confirmation(tmp_path):
@@ -233,7 +234,7 @@ def test_run_log_written_progressively_before_and_after_llm_confirmation(tmp_pat
         # No momento em que o usuario e perguntado, o log parcial ja deve
         # estar em disco com status "aguardando_confirmacao_llm".
         runs_dir = tmp_path / "runs"
-        log_files = list(runs_dir.glob("*.json"))
+        log_files = list(runs_dir.rglob("log.json"))
         assert len(log_files) == 1
         partial = json.loads(log_files[0].read_text(encoding="utf-8"))
         seen_statuses.append(partial["status"])
@@ -254,7 +255,7 @@ def test_run_log_written_progressively_before_and_after_llm_confirmation(tmp_pat
     assert seen_statuses == ["aguardando_confirmacao_llm"]
     assert result.status == "success"  # sobrescrito no final, no mesmo arquivo
     runs_dir = tmp_path / "runs"
-    log_files = list(runs_dir.glob("*.json"))
+    log_files = list(runs_dir.rglob("log.json"))
     assert len(log_files) == 1
     final = json.loads(log_files[0].read_text(encoding="utf-8"))
     assert final["status"] == "success"
@@ -282,7 +283,10 @@ def test_success_writes_report_alongside_json_log_in_mock_mode(tmp_path):
     assert result.report_path is not None
     report_file = Path(result.report_path)
     assert report_file.exists()
-    assert report_file.parent == runs_dir
+    # Dentro da pasta da propria execucao (runs/<run_id>/relatorio.pdf), nao
+    # solto em runs/ -- independente de --output ter sido customizado.
+    assert report_file.parent.parent == runs_dir
+    assert report_file.name == "relatorio.pdf"
     assert report_file.suffix == ".pdf"
     # PDF binario (compactado pelo xhtml2pdf) -- confere a assinatura do
     # formato em vez de procurar texto, que nao sobrevive a compressao.
@@ -529,7 +533,7 @@ def test_groq_api_key_never_appears_in_clear_text_in_run_log(tmp_path):
     )
 
     assert result.status == "success"
-    log_files = list((tmp_path / "runs").glob("*.json"))
+    log_files = list((tmp_path / "runs").rglob("*.json"))
     assert log_files
     for log_file in log_files:
         assert "segredo-nao-pode-vazar-no-log" not in log_file.read_text(encoding="utf-8")
@@ -626,7 +630,7 @@ def test_ecologia_somente_success_writes_log_with_tipo_execucao(tmp_path):
     assert result.status == "success"
     assert result.tipo_execucao == "ecologia_somente"
     assert result.ecologia_output_dir is not None
-    log_files = list(runs_dir.glob("*.json"))
+    log_files = list(runs_dir.rglob("log.json"))
     assert log_files
     log_data = json.loads(log_files[0].read_text(encoding="utf-8"))
     assert log_data["tipo_execucao"] == "ecologia_somente"

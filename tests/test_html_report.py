@@ -66,17 +66,17 @@ def test_full_context_renders_all_eight_sections_without_raising():
     # 2. Resumo geral
     assert "Resumo geral" in html
     # 3. Tabela de input bruto
-    assert 'id="tabela-entrada"' in html
+    assert 'id="dt-tabela-entrada"' in html
     # 4. Resumos do determinístico (diagnostics)
     assert "Refinamento dos hits de BLAST" in html
     assert "Checagem regional" in html
     # 5. Tabela de saida do deterministico
-    assert 'id="tabela-deterministica"' in html
+    assert 'id="dt-tabela-deterministica"' in html
     # 6. Curadoria assistida (narrativo + divergencia)
     assert "Relatorio narrativo de teste." in html
     assert "Vizinhos filogeneticos proximos de especie alvo." in html
     # 7. Tabela final
-    assert 'id="tabela-final"' in html
+    assert 'id="dt-tabela-final"' in html
     # 8. Analise ecologica (pedida, mas sem plots -- "nao disponivel")
     assert "Análise ecológica" in html
 
@@ -93,10 +93,10 @@ def test_ecologia_somente_context_renders_enxuta_version_with_warning():
 
     assert "Esta análise partiu de um CSV já curado" in html
     # Secoes que so existem numa execucao completa nao devem aparecer.
-    assert 'id="tabela-entrada"' not in html
-    assert 'id="tabela-deterministica"' not in html
+    assert 'id="dt-tabela-entrada"' not in html
+    assert 'id="dt-tabela-deterministica"' not in html
     # A tabela final (recebida) continua presente.
-    assert 'id="tabela-final"' in html
+    assert 'id="dt-tabela-final"' in html
 
 
 def test_empty_context_does_not_raise_and_shows_unavailable_sections():
