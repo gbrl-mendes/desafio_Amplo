@@ -589,7 +589,7 @@ def run(
             # calculado aqui em vez de so dentro de generate_report() porque
             # esse ultimo pula o calculo inteiro quando llm_mode == "off".
             report_stats = build_report_stats(curated_df, report_context)
-            print("\n=== Gerando relatorio narrativo ===")
+            print("\n=== Gerando relatorio ===")
             report_text, report_result = generate_report(
                 curated_df, report_context, mode=effective_llm_mode, api_key=groq_api_key, model=groq_model
             )
