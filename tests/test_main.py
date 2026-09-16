@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from harness.__main__ import build_parser, main
+import sys
+
+from harness.__main__ import build_parser, main, warn_if_store_python
 
 
 def test_parser_accepts_missing_input_csv_at_parse_time():
@@ -74,3 +76,24 @@ def test_main_routes_to_ecologia_somente_without_running_full_pipeline(tmp_path,
 
     assert exit_code == 0
     assert calls == {"run": 0, "run_ecologia_somente": 1}
+
+
+def test_warn_if_store_python_warns_when_base_prefix_is_windowsapps(monkeypatch, capsys):
+    monkeypatch.setattr(
+        sys, "base_prefix", r"C:\Users\Gabriel\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13"
+    )
+
+    warn_if_store_python()
+
+    captured = capsys.readouterr()
+    assert "Microsoft Store" in captured.err
+    assert "python.org" in captured.err
+
+
+def test_warn_if_store_python_silent_for_a_regular_install(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "base_prefix", r"C:\Users\Gabriel\AppData\Local\Programs\Python\Python313")
+
+    warn_if_store_python()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""

@@ -22,6 +22,29 @@ from pathlib import Path
 from harness.orchestrator import DEFAULT_RUNS_DIR, run, run_ecologia_somente
 
 
+def warn_if_store_python() -> None:
+    """No Windows, um venv criado a partir do Python da Microsoft Store pode
+    fazer com que pacotes R instalados depois da criacao do venv fiquem
+    invisiveis para os subprocessos R deste harness (mesmo com
+    `Rscript r/install_packages.R` rodando com sucesso) -- uma virtualizacao
+    de sistema de arquivos do proprio Windows para apps de Store, nao um bug
+    deste projeto. `sys.base_prefix` aponta pro Python base por tras do venv
+    (nao pro `.venv` em si), entao "WindowsApps" ali intalado indica esse caso.
+    """
+    if "WindowsApps" in sys.base_prefix:
+        print(
+            "Aviso: este ambiente virtual foi criado a partir do Python da Microsoft "
+            f"Store ({sys.base_prefix}). Em alguns casos, isso faz com que pacotes R "
+            "instalados depois da criacao deste venv fiquem invisiveis para os "
+            "subprocessos R deste harness, mesmo que 'Rscript r/install_packages.R' "
+            "rode sem erro -- uma etapa em R pode falhar com algo como \"nao ha nenhum "
+            "pacote chamado 'x'\" apesar do pacote existir de fato. Se isso acontecer, "
+            "reinstale o Python via https://python.org (nao a Microsoft Store) e recrie "
+            "o venv (veja 'Requisitos' no README.md).",
+            file=sys.stderr,
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m harness",
@@ -125,6 +148,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    warn_if_store_python()
+
     parser = build_parser()
     args = parser.parse_args(argv)
 
