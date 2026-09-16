@@ -31,6 +31,23 @@ Veja [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md) para o problema, o domínio,
 
 ## Instalação
 
+Um comando só, cria o venv, instala as dependências Python, instala os pacotes R e confere se há um navegador Chromium disponível (necessário pro relatório em PDF) -- idempotente, pode rodar de novo sem problema (ex. depois de um `git pull`):
+
+```powershell
+# PowerShell (Windows)
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+```bash
+# bash / Git Bash / WSL / Linux / Mac
+bash setup.sh
+```
+
+Se o Python encontrado for o da Microsoft Store (comum numa instalação nova do Windows), o script avisa e recomenda trocar antes de continuar -- essa versão do Python tem um bug real conhecido neste projeto (ver "Requisitos" abaixo). Se `Rscript` ou um navegador Chromium não forem encontrados, o script avisa e continua o resto da instalação de qualquer forma, com instruções do que fazer depois.
+
+<details>
+<summary>Instalação manual, passo a passo (o que o script acima faz por debaixo dos panos)</summary>
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate        # Windows
@@ -46,6 +63,8 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 ```
 
 Vale só para essa sessão, não precisa de administrador.
+
+</details>
 
 ## Execução
 
