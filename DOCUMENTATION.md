@@ -133,7 +133,7 @@ Depois de revisar `Curated ID` manualmente num CSV já curado por uma execução
 
 ## Relatório HTML
 
-Toda execução que roda a análise ecológica (`--ecologia` ou `--ecologia-somente`) gera também um relatório único em `runs/<run_id>/<run_id>_report.html`, autocontido (sem depender de internet ou de outros arquivos para abrir), com navegação lateral por seção (estilo MultiQC) e tabelas com barra de rolagem própria.
+Toda execução gera também um relatório único em `runs/<run_id>/<run_id>_report.html`, autocontido (sem depender de internet ou de outros arquivos para abrir), com navegação lateral por seção (estilo MultiQC) e tabelas com barra de rolagem própria. Você pode ver uma prévia de como fica em [Relatório de exemplo](RELATORIO_EXEMPLO.html)
 
 Assim que fica pronto, o relatório abre sozinho no navegador, numa janela nova. A barra lateral também traz um botão "Abrir pasta desta execução", que abre a pasta `runs/<run_id>/` (CSV final, PDF, e a pasta `ecologia/`).
 
