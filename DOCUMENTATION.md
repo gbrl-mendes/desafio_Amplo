@@ -1,4 +1,4 @@
-# Desafio Amplo — Documentação completa
+# Documentação completa
 
 Para instalar e rodar o exemplo básico, veja o [Início](README.md). Este documento cobre a arquitetura completa, todos os parâmetros de configuração, e todos os exemplos de uso.
 
@@ -46,12 +46,14 @@ Para instalar e rodar o exemplo básico, veja o [Início](README.md). Este docum
 
 Cada execução ganha sua própria sub-pasta em `runs/`, nomeada com o `run_id` (curto e ordenável cronologicamente, ex. `20260916-004104`) -- tudo que uma execução produziu fica junto, e os arquivos dentro dessa pasta levam o `run_id` no próprio nome (a pasta `ecologia/` não, já que seu nome já está dentro da pasta do `run_id`):
 
+```
 runs/<run_id>/
-├── <run_id>_log.json # status, validação, o que a curadoria assistida revisou, avisos e erros
-├── <run_id>_output_pos_curadoria_LLM.csv # CSV final (a menos que --output aponte pra outro caminho)
-├── <run_id>_relatorio.pdf # relatório narrativo em PDF, só com --llm-mode != off
-├── <run_id>_report.html # relatório HTML único, só quando a análise ecológica roda
-└── ecologia/ # tabelas (CSV) e gráficos (PNG/HTML), só com --ecologia ou --ecologia-somente
+├── <run_id>_log.json                            # status, validação, o que a curadoria assistida revisou, avisos e erros
+├── <run_id>_output_pos_curadoria_LLM.csv         # CSV final (a menos que --output aponte pra outro caminho)
+├── <run_id>_relatorio.pdf                        # relatório narrativo em PDF, só com --llm-mode != off
+├── <run_id>_report.html                          # relatório HTML único, só quando a análise ecológica roda
+└── ecologia/                                     # tabelas (CSV) e gráficos, só com --ecologia ou --ecologia-somente
+```
 
 O CSV final sempre traz uma coluna `Curated ID`, preenchida automaticamente (`Assisted ID (LLM)` quando existir, senão a identificação determinística). É a mesma coluna que, no fluxo tradicional deste tipo de projeto, um especialista preencheria à mão antes da análise ecológica: aqui vem pré-preenchida como sugestão, e o profissional pode revisar e sobrescrever qualquer valor antes de rodar `--ecologia` (nessa mesma execução) ou `--ecologia-somente` (numa execução separada, depois de revisar o CSV). Essa versão automática não é o gabarito de curadoria humana revisado formalmente: essa validação, quando feita, acontece fora deste repositório (ver [Domínio e contrato](DOMINIO_E_CONTRATO.md)).
 
