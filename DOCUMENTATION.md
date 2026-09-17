@@ -53,7 +53,7 @@ bash setup.sh
   - `live` (padrão): chama a Groq nas duas etapas, preenchendo as colunas `Assisted ID/Confidence/Justification (LLM)` e gravando o relatório em `runs/<run_id>/<run_id>_relatorio.pdf`. Sem chave configurada, as duas etapas são puladas e a execução segue normalmente.
   - `mock`: não chama a Groq, preenche as mesmas colunas e o mesmo relatório com uma resposta simulada, para testar o encadeamento sem gastar cota de API.
   - `off`: pula as duas etapas por completo. Sai só o CSV do pipeline em R e o log JSON, sem colunas assistidas e sem relatório narrativo.
-- `--reference`: CSV opcional (`;`-delimitado, UTF-8, pelo menos 2 colunas: ponto amostral na primeira, taxon na última ou numa coluna chamada `Taxon_binomial`; colunas extras no meio, e o nome literal de cada coluna, são irrelevantes) com espécies já registradas por métodos tradicionais nos mesmos pontos amostrais, usado como evidência adicional na curadoria assistida (ver [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md)). Também alimenta a comparação eDNA × tradicional de `--ecologia`, se essa flag for usada. Exemplo em [`data/example/exemplo_1/spp_tradicional.csv`](data/example/exemplo_1/spp_tradicional.csv).
+- `--reference`: CSV opcional (`;`-delimitado, UTF-8, pelo menos 2 colunas: ponto amostral na primeira, taxon na última ou numa coluna chamada `Taxon_binomial`; colunas extras no meio, e o nome literal de cada coluna, são irrelevantes) com espécies já registradas por métodos tradicionais nos mesmos pontos amostrais, usado como evidência adicional na curadoria assistida (ver [Dominio e contrato.md](DOMINIO_E_CONTRATO.md)). Também alimenta a comparação eDNA × tradicional de `--ecologia`, se essa flag for usada. Exemplo em [`data/example/exemplo_1/spp_tradicional.csv`](data/example/exemplo_1/spp_tradicional.csv).
 - `--ecologia`: roda a análise ecológica ([`r/analise_ecologica.qmd`](r/analise_ecologica.qmd)) logo após a curadoria assistida, sobre a coluna `Curated ID` do CSV final. Escreve tabelas e gráficos em `runs/<run_id>/ecologia/`, e também gera o relatório HTML único (ver "Relatório HTML" abaixo). Desligada por padrão; uma falha aqui nunca invalida a curadoria já concluída, só fica registrada no log.
 - `--ecologia-somente <curado.csv>`: roda só a análise ecológica sobre um CSV já curado por uma execução anterior, opcionalmente revisado à mão (ver o parágrafo sobre `Curated ID` abaixo). Mutuamente exclusivo com `<entrada.csv>`: não refaz nenhuma etapa de curadoria, só valida as colunas mínimas necessárias e chama a análise ecológica. Exemplo em "Exemplos" abaixo.
 - `--groq-api-key`: informam a chave Groq. Ver "Configuração da chave da Groq" abaixo para mais informações.
@@ -229,7 +229,7 @@ Isso renomeia a coluna para `Researcher` antes de qualquer outra etapa rodar, in
 
 ## Formatos de entrada e saída
 
-Entrada e saída são ambos CSV delimitado por `;`, decimal `,`, UTF-8, com aspas no padrão CSV comum. A lista completa de colunas de saída está em [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md), e o contrato de entrada em [`data/reference/asv_input_schema.yaml`](data/reference/asv_input_schema.yaml).
+Entrada e saída são ambos CSV delimitado por `;`, decimal `,`, UTF-8, com aspas no padrão CSV comum. A lista completa de colunas de saída está em [Dominio e contrato.md](DOMINIO_E_CONTRATO.md), e o contrato de entrada em [`data/reference/asv_input_schema.yaml`](data/reference/asv_input_schema.yaml).
 
 ## Rodando os testes
 
