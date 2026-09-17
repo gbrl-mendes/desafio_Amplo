@@ -1,6 +1,6 @@
 # Como baixar o projeto do GitHub
 
-Estas instruções mostram como copiar o repositório para o seu computador antes de instalar e executar o sistema. Para instalar e rodar, veja o [README](README.md) depois de baixar.
+Estas instruções mostram como copiar o repositório para o seu computador antes de instalar e executar o sistema. Para instalar e rodar, após baixar veja o [README](README.md) para uma versão resumida das instruções ou [Documentação completa](DOCUMENTATION.md) para uma versão mais detalhada.
 
 > Se você já baixou o projeto como arquivo `.zip` e o extraiu, pule para a seção **Alternativa: baixar como ZIP** (passo 8 em diante) só se precisar relembrar onde continuar.
 
