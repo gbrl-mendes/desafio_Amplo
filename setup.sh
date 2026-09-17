@@ -223,6 +223,20 @@ if [ -z "$RSCRIPT_BIN" ]; then
   warn "depois (ou rode este script de novo)."
 else
   ok "Usando $RSCRIPT_BIN"
+  if [ "$OS_NAME" = "Linux" ]; then
+    # Varios pacotes R deste projeto compilam contra bibliotecas C externas
+    # (libxml2, openssl, libcurl, fontconfig/freetype, harfbuzz/fribidi,
+    # libuv, libpng/libtiff/libjpeg) -- sem os headers de desenvolvimento
+    # dessas bibliotecas instalados no sistema, a compilacao falha. No
+    # Windows/Mac isso nunca aparece porque o CRAN ja tem binario pronto.
+    # Confirmado numa maquina real: 39 pacotes R falharam em cascata por
+    # falta exatamente disso (tidyverse/taxize/rgbif dependem de curl/xml2/
+    # openssl, que dependem dessas bibliotecas de sistema).
+    install_via_pkg_manager "bibliotecas de desenvolvimento (libxml2, openssl, libcurl, fontconfig, etc.)" \
+      "build-essential libcurl4-openssl-dev libssl-dev libxml2-dev libfontconfig1-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev libuv1-dev" \
+      "gcc gcc-c++ make libcurl-devel openssl-devel libxml2-devel fontconfig-devel harfbuzz-devel fribidi-devel freetype-devel libpng-devel libtiff-devel libjpeg-turbo-devel libuv-devel" \
+      "" || true
+  fi
   "$RSCRIPT_BIN" r/install_packages.R
 fi
 
