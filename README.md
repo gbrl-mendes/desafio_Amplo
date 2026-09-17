@@ -26,7 +26,7 @@ Sem Git instalado, ou preferindo não instalar: baixe como ZIP pela página do r
 
 2. **Instale as dependências.**
 
-Um comando só, cria o venv, instala as dependências Python, instala os pacotes R e confere se há um navegador Chromium disponível (necessário pro relatório em PDF) -- idempotente, pode rodar de novo sem problema (ex. depois de um `git pull`):
+Um comando só: se Python ou R não estiverem instalados, tenta instalar os dois sozinho (winget no Windows, Homebrew no Mac, apt/dnf no Linux -- se nenhum gerenciador estiver disponível, pede instalação manual); depois cria o venv, instala as dependências Python, instala os pacotes R e confere se há um navegador Chromium disponível (necessário pro relatório em PDF). Idempotente, pode rodar de novo sem problema (ex. depois de um `git pull`):
 
 ```powershell
 # PowerShell (Windows)

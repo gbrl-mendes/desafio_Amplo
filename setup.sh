@@ -5,7 +5,11 @@
 # rodar de novo sem problema (ex. depois de um `git pull`).
 #
 # Uso (bash, Git Bash, WSL, Linux, Mac): bash setup.sh
-# Para PowerShell nativo no Windows, use setup.ps1 em vez deste.
+# Para PowerShell nativo no Windows, use setup.ps1 em vez deste (inclusive
+# pra instalacao automatica de Python/R via winget -- este script so tenta
+# isso no Mac via Homebrew e no Linux via apt/dnf, ver install_via_pkg_manager
+# abaixo; no Git Bash/WSL sobre Windows, sem nenhum dos dois disponiveis,
+# cai pra pedir instalacao manual, do mesmo jeito que sempre fez).
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -15,6 +19,39 @@ warn() { printf '\033[33m[aviso]\033[0m %s\n' "$1"; }
 err()  { printf '\033[31m[erro]\033[0m %s\n' "$1"; }
 ok()   { printf '\033[32m[ok]\033[0m %s\n' "$1"; }
 
+OS_NAME="$(uname -s)"
+
+# Tenta instalar $1 (nome exibido) via Homebrew (Mac) ou apt/dnf (Linux),
+# com os pacotes certos pra cada gerenciador ($2 = pacotes pro apt, $3 =
+# pacotes pro dnf, $4 = pacote(s) pro brew). Devolve 1 (falha) sem erro se
+# nenhum gerenciador estiver disponivel -- quem chamou decide o que fazer.
+install_via_pkg_manager() {
+  local display_name="$1" apt_pkgs="$2" dnf_pkgs="$3" brew_pkgs="$4"
+  if [ "$OS_NAME" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+    warn "$display_name nao encontrado -- tentando instalar via Homebrew ($brew_pkgs)..."
+    # shellcheck disable=SC2086
+    brew install $brew_pkgs && { hash -r; return 0; }
+    warn "Homebrew nao conseguiu instalar $display_name."
+    return 1
+  elif command -v apt-get >/dev/null 2>&1; then
+    warn "$display_name nao encontrado -- tentando instalar via apt ($apt_pkgs), pode pedir sua senha (sudo)..."
+    # shellcheck disable=SC2086
+    sudo apt-get update -qq && sudo apt-get install -y $apt_pkgs && { hash -r; return 0; }
+    warn "apt nao conseguiu instalar $display_name."
+    return 1
+  elif command -v dnf >/dev/null 2>&1; then
+    warn "$display_name nao encontrado -- tentando instalar via dnf ($dnf_pkgs), pode pedir sua senha (sudo)..."
+    # shellcheck disable=SC2086
+    sudo dnf install -y $dnf_pkgs && { hash -r; return 0; }
+    warn "dnf nao conseguiu instalar $display_name."
+    return 1
+  else
+    warn "Nenhum gerenciador de pacotes conhecido (Homebrew/apt/dnf) disponivel --"
+    warn "nao consigo instalar $display_name sozinho nesta maquina."
+    return 1
+  fi
+}
+
 bold "=== 1/5: Localizando o Python ==="
 PYTHON_BIN="${PYTHON:-}"
 if [ -z "$PYTHON_BIN" ]; then
@@ -22,10 +59,20 @@ if [ -z "$PYTHON_BIN" ]; then
     PYTHON_BIN=python3
   elif command -v python >/dev/null 2>&1; then
     PYTHON_BIN=python
-  else
-    err "Python nao encontrado. Instale o Python 3.11+ em https://www.python.org/downloads/ e rode este script de novo."
-    exit 1
   fi
+fi
+
+if [ -z "$PYTHON_BIN" ]; then
+  if install_via_pkg_manager "Python" "python3 python3-venv python3-pip" "python3 python3-pip" "python"; then
+    if command -v python3 >/dev/null 2>&1; then PYTHON_BIN=python3; fi
+  fi
+fi
+
+if [ -z "$PYTHON_BIN" ]; then
+  err "Python nao encontrado (nem instalavel automaticamente nesta maquina)."
+  err "Instale o Python 3.11+ manualmente em https://www.python.org/downloads/ e rode"
+  err "este script de novo."
+  exit 1
 fi
 
 PYTHON_PATH="$("$PYTHON_BIN" -c 'import sys; print(sys.executable)' 2>/dev/null || true)"
@@ -77,30 +124,40 @@ bold "=== 3/5: Dependencias Python ==="
 ok "Dependencias Python instaladas."
 
 bold "=== 4/5: R e seus pacotes ==="
-RSCRIPT_BIN=""
-if command -v Rscript >/dev/null 2>&1; then
-  RSCRIPT_BIN=Rscript
-else
+find_rscript() {
+  if command -v Rscript >/dev/null 2>&1; then
+    command -v Rscript
+    return 0
+  fi
   # Mesmos locais que harness/orchestrator.py::find_rscript() tenta quando
   # Rscript nao esta no PATH -- manter os dois em sincronia se um mudar.
   for candidate in "/c/Program Files/R"/R-*/bin/Rscript.exe "/c/Program Files (x86)/R"/R-*/bin/Rscript.exe; do
     if [ -x "$candidate" ]; then
-      RSCRIPT_BIN="$candidate"
-      break
+      echo "$candidate"
+      return 0
     fi
   done
+  return 1
+}
+
+RSCRIPT_BIN="$(find_rscript || true)"
+if [ -z "$RSCRIPT_BIN" ]; then
+  if install_via_pkg_manager "R" "r-base" "R" "r"; then
+    RSCRIPT_BIN="$(find_rscript || true)"
+  fi
 fi
 
 if [ -z "$RSCRIPT_BIN" ]; then
-  warn "Rscript nao encontrado. Instale o R 4.x em https://www.r-project.org e rode"
-  warn "'Rscript r/install_packages.R' manualmente depois (ou rode este script de novo)."
+  warn "Rscript nao encontrado (nem instalavel automaticamente nesta maquina). Instale o"
+  warn "R 4.x manualmente em https://www.r-project.org e rode 'Rscript r/install_packages.R'"
+  warn "depois (ou rode este script de novo)."
 else
   ok "Usando $RSCRIPT_BIN"
   "$RSCRIPT_BIN" r/install_packages.R
 fi
 
 bold "=== 5/5: Navegador Chromium (pro relatorio em PDF) ==="
-# Mesmos locais que harness/pdf_report.py::_find_chromium_browser() tenta.
+# Mesmos locais que harness/pdf_report.py::find_chromium_browser() tenta.
 if command -v msedge >/dev/null 2>&1 || command -v chrome >/dev/null 2>&1 \
   || command -v google-chrome >/dev/null 2>&1 || command -v chromium >/dev/null 2>&1 \
   || [ -e "/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" ] \
@@ -114,4 +171,4 @@ fi
 
 echo
 bold "Tudo pronto. Exemplo pra rodar:"
-echo "  $VENV_PYTHON -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --groq-api-key <chave>"
+echo "  $VENV_PYTHON -m harness data/example/exemplo_1/eDNA_cipo_subset.csv --groq-api-key <chave>"

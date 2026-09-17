@@ -2,7 +2,7 @@
 
 Estas instruções mostram como copiar o repositório para o seu computador antes de instalar e executar o sistema. Para instalar e rodar, após baixar veja o [README](README.md) para uma versão resumida das instruções ou [Documentação completa](DOCUMENTATION.md) para uma versão mais detalhada.
 
-> Se você já baixou o projeto como arquivo `.zip` e o extraiu, pule para a seção **Alternativa: baixar como ZIP** (passo 8 em diante) só se precisar relembrar onde continuar.
+> Se você já baixou o projeto como arquivo `.zip` e o extraiu, pule para a seção **Alternativa: baixar como ZIP** (passo 8 em diante).
 
 ## Opção recomendada: clonar com Git
 
@@ -78,7 +78,7 @@ Você deverá encontrar, entre outros, os arquivos `README.md`, `setup.ps1`, `se
 
 ### 5. Continue para a instalação
 
-A partir desta pasta, siga as instruções de instalação do [README.md](README.md).
+A partir desta pasta, siga as instruções de instalação do [README](README.md), para uma versão mais enxuta da explicação ou Documentação completa, para uma explicação mais detalhada de todas as etapas.
 
 ## Alternativa: baixar como ZIP
 
