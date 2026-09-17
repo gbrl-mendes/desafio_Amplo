@@ -83,9 +83,7 @@ Um CSV final (mesmo formato de entrada), com as colunas reordenadas para compati
 Ver [README](README.md) para instalação, dependências e exemplo de execução. Em resumo:
 
 ```bash
-python -m harness data/example/exemplo_1/dasafio_Amplo-eDNA_cipo_subset_output-2026-09-13.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia --groq-api-key <chave>
+python -m harness data/example/exemplo_1/eDNA_cipo_subset.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia --groq-api-key <chave>
 ```
 
 Um segundo exemplo, de outro domínio (raízes, primer ITS2, plantas, sem latitude/longitude), está em [`data/example/exemplo_2/`](data/example/exemplo_2/), com o `--config` correspondente já pronto (ver README para o comando completo).
-
-
