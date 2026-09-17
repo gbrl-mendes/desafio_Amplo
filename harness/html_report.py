@@ -67,7 +67,14 @@ def _metadata_summary(df: Optional[pd.DataFrame]) -> Optional[dict]:
         tipo = df["Type"].astype(str).str.strip().str.casefold()
         summary["amostras_reais"] = int((tipo == "sample").sum())
         summary["controles"] = int((tipo != "sample").sum())
-    for col in ("Latitude", "Longitude", "Habitat", "Rios"):
+    # So Latitude/Longitude aqui -- fazem parte do contrato universal de
+    # entrada (usadas pela checagem regional no GBIF, ver DOMINIO_E_CONTRATO.md),
+    # entao sao relevantes pra qualquer projeto. "Habitat"/"Rios" (removidos
+    # daqui) eram nomes especificos do dataset de demonstracao eDNA_Cipo --
+    # so o default de `ecologia.metadados_grupo` no config, nao um contrato
+    # universal; apareciam como "ausente" em qualquer outro projeto (ex.
+    # roots_metabar) que nao usa essas categorias, o que so confundia.
+    for col in ("Latitude", "Longitude"):
         summary[f"tem_{col.lower()}"] = bool(col in df.columns and df[col].notna().any())
 
     for col in DATE_COLUMN_CANDIDATES:

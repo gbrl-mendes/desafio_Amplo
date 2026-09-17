@@ -260,9 +260,7 @@ $(function () {
       {% if metadata_summary.data_min and metadata_summary.data_max %}<div class="stat"><div class="value" style="font-size:1rem;">{{ metadata_summary.data_min }} – {{ metadata_summary.data_max }}</div><div class="label">Faixa de datas</div></div>{% endif %}
     </div>
     <div class="flags">
-      Latitude/Longitude: {{ "presente" if metadata_summary.tem_latitude else "ausente" }} &middot;
-      Habitat: {{ "presente" if metadata_summary.tem_habitat else "ausente" }} &middot;
-      Rios: {{ "presente" if metadata_summary.tem_rios else "ausente" }}
+      Latitude/Longitude: {{ "presente" if metadata_summary.tem_latitude else "ausente" }}
     </div>
     {% else %}
     <p class="empty-note">Seção não disponível.</p>

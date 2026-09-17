@@ -21,6 +21,7 @@ nav:
   - Domínio e contrato: DOMINIO_E_CONTRATO.md
   - Documentação completa: DOCUMENTATION.md
   - Decisões e limitações: DECISOES_E_LIMITACOES.md
+  - Relatório de exemplo: RELATORIO_EXEMPLO.html
 
 markdown_extensions:
   - tables
