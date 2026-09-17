@@ -1,7 +1,7 @@
 Decisões, premissas e limitações
 ================================
 
-Este documento reúne, num só lugar, as principais decisões de arquitetura tomadas ao longo do desenvolvimento, as premissas assumidas sem verificação automática, e as limitações conhecidas do sistema. Complementa, não substitui, os comentários seção a seção em [`r/curadoria_deterministica.qmd`](https://claude.ai/chat/r/curadoria_deterministica.qmd)  e a tabela de riscos em [DOMINIO_E_CONTRATO.md](https://claude.ai/chat/DOMINIO_E_CONTRATO.md).
+Este documento reúne, num só lugar, as principais decisões de arquitetura tomadas ao longo do desenvolvimento, as premissas assumidas sem verificação automática, e as limitações conhecidas do sistema. Complementa, não substitui, os comentários seção a seção em [`r/curadoria_deterministica.qmd`](https://claude.ai/chat/r/curadoria_deterministica.qmd)  e a tabela de riscos em [Domínio e contrato](https://claude.ai/chat/DOMINIO_E_CONTRATO.md).
 
 
 ## Decisões de arquitetura
