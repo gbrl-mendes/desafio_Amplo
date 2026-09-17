@@ -21,6 +21,22 @@ ok()   { printf '\033[32m[ok]\033[0m %s\n' "$1"; }
 
 OS_NAME="$(uname -s)"
 
+# Rodar o script inteiro com sudo/como root normalmente nao e necessario --
+# os passos que exigem privilegio (instalar pacotes do sistema via apt/dnf,
+# ver install_via_pkg_manager abaixo) ja chamam sudo por conta propria
+# quando precisam. Fazer isso no script inteiro pode deixar ".venv" com o
+# dono errado pro uso normal depois (foi exatamente isso que aconteceu numa
+# maquina real: a primeira tentativa sem sudo falhou no meio por falta do
+# modulo venv/pip do sistema, e rodar de novo com sudo criou um .venv
+# incompleto e com dono misto).
+if command -v id >/dev/null 2>&1 && [ "$(id -u)" = "0" ]; then
+  warn "Rodando como root/sudo -- normalmente nao precisa disso pra este script."
+  warn "Os passos que exigem privilegio (instalar pacotes do sistema) ja chamam sudo"
+  warn "sozinhos quando necessario. Rodar o script inteiro como root pode deixar '.venv'"
+  warn "com o dono errado pro seu uso normal depois. Considere interromper (Ctrl+C) e"
+  warn "rodar de novo sem sudo."
+fi
+
 # Tenta instalar $1 (nome exibido) via Homebrew (Mac) ou apt/dnf (Linux),
 # com os pacotes certos pra cada gerenciador ($2 = pacotes pro apt, $3 =
 # pacotes pro dnf, $4 = pacote(s) pro brew). Devolve 1 (falha) sem erro se
@@ -105,18 +121,62 @@ esac
 ok "Usando $PYTHON_BIN ($PYTHON_PATH)"
 
 bold "=== 2/5: Ambiente virtual (.venv) ==="
-if [ ! -d .venv ]; then
-  "$PYTHON_BIN" -m venv .venv
-  ok "venv criado."
-else
-  ok "venv ja existe, reaproveitando."
+venv_python_path() {
+  if [ -f .venv/Scripts/python.exe ]; then
+    echo .venv/Scripts/python.exe  # Windows
+  elif [ -f .venv/bin/python ]; then
+    echo .venv/bin/python           # Linux/Mac
+  fi
+}
+
+venv_is_functional() {
+  local vp
+  vp="$(venv_python_path)"
+  [ -n "$vp" ] && "$vp" -m pip --version >/dev/null 2>&1
+}
+
+if [ -d .venv ] && ! venv_is_functional; then
+  # Existe mas nao tem pip -- provavelmente de uma tentativa anterior que
+  # falhou no meio (ex. sem o modulo venv/ensurepip do sistema, comum no
+  # Debian/Ubuntu -- ver abaixo). Reaproveitar um venv assim so espalharia
+  # o mesmo problema (era exatamente o "No module named pip" que apareceu
+  # numa maquina real depois de uma tentativa quebrada).
+  warn ".venv existe mas esta incompleto (sem pip) -- removendo e recriando do zero."
+  if ! rm -rf .venv 2>/dev/null; then
+    err "Nao consegui remover '.venv' (pode ter sido criado com sudo antes, com outro dono)."
+    err "Rode 'sudo rm -rf .venv' manualmente e depois este script de novo, sem sudo."
+    exit 1
+  fi
 fi
 
-if [ -f .venv/Scripts/python.exe ]; then
-  VENV_PYTHON=.venv/Scripts/python.exe  # Windows
+if [ ! -d .venv ]; then
+  venv_err="$(mktemp)"
+  if ! "$PYTHON_BIN" -m venv .venv 2>"$venv_err"; then
+    cat "$venv_err" >&2
+    rm -f "$venv_err"
+    # No Debian/Ubuntu, o pacote "python3" base nao inclui o modulo venv/pip
+    # (fica em "python3-venv"/"python3-pip" separados) -- diferente do caso
+    # "python3 nao encontrado" tratado no passo 1, aqui o python3 EXISTE,
+    # so esta incompleto, entao so cai aqui quando a criacao de fato falha.
+    warn "Falha ao criar o venv -- tentando instalar o modulo venv/pip via gerenciador de"
+    warn "pacotes do sistema..."
+    install_via_pkg_manager "python3-venv/pip" "python3-venv python3-pip" "python3-pip" "python" || true
+    hash -r
+    rm -rf .venv
+    if ! "$PYTHON_BIN" -m venv .venv; then
+      err "Ainda nao consegui criar o venv. Instale manualmente o pacote 'python3-venv'"
+      err "(Debian/Ubuntu) ou equivalente da sua distro e rode este script de novo."
+      exit 1
+    fi
+  else
+    rm -f "$venv_err"
+  fi
+  ok "venv criado."
 else
-  VENV_PYTHON=.venv/bin/python           # Linux/Mac
+  ok "venv ja existe e funciona, reaproveitando."
 fi
+
+VENV_PYTHON="$(venv_python_path)"
 
 bold "=== 3/5: Dependencias Python ==="
 "$VENV_PYTHON" -m pip install --upgrade pip --quiet
