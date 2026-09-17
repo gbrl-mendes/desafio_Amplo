@@ -4,6 +4,17 @@
 
 options(repos = c(CRAN = "https://cloud.r-project.org"))
 
+# No Windows o CRAN tem binario pronto (so baixa e descompacta); no Linux/Mac
+# so tem codigo-fonte, entao cada pacote e compilado localmente (C/C++/
+# Fortran) -- bem mais lento, principalmente pacotes com bastante codigo
+# compilado como DECIPHER. Ncpus manda o install.packages()/BiocManager
+# compilar varios pacotes em paralelo entre os nucleos da CPU, em vez de um
+# de cada vez -- nao muda de onde os pacotes vem, so usa mais nucleos ao
+# mesmo tempo.
+n_cpus <- tryCatch(max(1, parallel::detectCores() - 1), error = function(e) 1)
+options(Ncpus = n_cpus)
+cat(sprintf("Usando %d nucleo(s) em paralelo para compilar pacotes (relevante so em Linux/Mac).\n", n_cpus))
+
 cran_packages <- c(
   "tidyverse", "yaml", "taxize", "ape", "rgbif", "vegan", "jsonlite",
   "plotly", "htmlwidgets", "ggdendro", "rmarkdown", "pandoc", "gh", "BiocManager",
