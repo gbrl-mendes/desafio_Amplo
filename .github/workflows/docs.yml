@@ -21,7 +21,7 @@ jobs:
       - name: Preparar pasta de documentação
         run: |
           mkdir -p site-docs
-          cp README.md DOMINIO_E_CONTRATO.md DOCUMENTATION.md DECISOES_E_LIMITACOES.md COMO_BAIXAR.md RELATORIO_EXEMPLO.html site-docs/
+                    cp README.md DOMINIO_E_CONTRATO.md DOCUMENTATION.md DECISOES_E_LIMITACOES.md COMO_BAIXAR.md RELATORIO_EXEMPLO.html extra.css site-docs/
       - run: mkdocs build
       - uses: actions/upload-pages-artifact@v3
         with:
