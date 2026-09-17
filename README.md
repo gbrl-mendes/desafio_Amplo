@@ -2,9 +2,9 @@
 
 Este projeto implementa minha resposta ao desafio técnico do processo seletivo para a vaga de Cientista de Dados Pleno na Amplo Engenharia, desenvolvido segundo os parâmetros pré-definidos para os concorrentes.
 
-O problema resolvido, descrito em detalhes em [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md), é hipotético: uma consultoria ambiental recebe uma tabela bruta de sequências de DNA ambiental e precisa transformá-la numa base de dados confiável sobre quais espécies existem numa área de estudo. Este é o sistema que a cientista de dados dessa consultoria executaria para resolver essa demanda, em qualquer projeto de metabarcoding que receber, independente do grupo taxonômico ou do substrato amostrado. Ele identifica cada sequência taxonomicamente, separa detecção real de contaminação, confere se o tamanho é compatível com o marcador genético usado, e, para os casos que essas três etapas não resolvem sozinhas, consulta um modelo de linguagem (LLM) com a evidência já calculada para uma segunda opinião. No final, o profissional humano ainda tem a possibilidade de definir, com base em tudo que foi gerado, quais são as identificações mais parcimoniosas.
+O problema resolvido, descrito em detalhes em [DOMINIO E CONTRATO](DOMINIO_E_CONTRATO.md), é hipotético: uma consultoria ambiental recebe uma tabela bruta de sequências de DNA ambiental e precisa transformá-la numa base de dados confiável sobre quais espécies existem numa área de estudo. Este é o sistema que a cientista de dados dessa consultoria executaria para resolver essa demanda, em qualquer projeto de metabarcoding que receber, independente do grupo taxonômico ou do substrato amostrado. Ele identifica cada sequência taxonomicamente, separa detecção real de contaminação, confere se o tamanho é compatível com o marcador genético usado, e, para os casos que essas três etapas não resolvem sozinhas, consulta um modelo de linguagem (LLM) com a evidência já calculada para uma segunda opinião. No final, o profissional humano ainda tem a possibilidade de definir, com base em tudo que foi gerado, quais são as identificações mais parcimoniosas.
 
-Veja [DOMINIO_E_CONTRATO.md](DOMINIO_E_CONTRATO.md) para o problema, o domínio e as limitações declaradas deste sistema; [RELATORIO_EXEMPLO.html](RELATORIO_EXEMPLO.html) para uma execução real sobre o dado de demonstração, com achados concretos; e [DOCUMENTATION.md](DOCUMENTATION.md) para a arquitetura completa, todos os parâmetros de configuração e todos os exemplos de uso. Por último, o documento [DECISOES_E_LIMITACOES.md](DECISOES_E_LIMITACOES.md) oferece uma visão geral sobre o que foi decido durante o desenvolvimento deste projeto.
+Veja [DOMINIO E CONTRATO](DOMINIO_E_CONTRATO.md) para o problema, o domínio e as limitações declaradas deste sistema; [RELATORIO_EXEMPLO.html](RELATORIO_EXEMPLO.html) para uma execução real sobre o dado de demonstração, com achados concretos; e [DOCUMENTATION](DOCUMENTATION.md) para a arquitetura completa, todos os parâmetros de configuração e todos os exemplos de uso. Por último, o documento [DECISOES E LIMITACOES](DECISOES_E_LIMITACOES.md) oferece uma visão geral sobre o que foi decido durante o desenvolvimento deste projeto.
 
 ## Requisitos
 
@@ -22,7 +22,7 @@ git clone https://github.com/gbrl-mendes/desafio_Amplo.git
 cd desafio_Amplo
 ```
 
-Sem Git instalado, ou preferindo não instalar: baixe como ZIP pela página do repositório (botão verde **Code** → **Download ZIP**), extraia, e abra um terminal dentro da pasta extraída. Passo a passo completo, com solução de problemas comuns, em [COMO_BAIXAR.md](COMO_BAIXAR.md).
+Sem Git instalado, ou preferindo não instalar: baixe como ZIP pela página do repositório (botão verde **Code** → **Download ZIP**), extraia, e abra um terminal dentro da pasta extraída. Passo a passo completo, com solução de problemas comuns, em [COMO BAIXAR](COMO_BAIXAR.md).
 
 2. **Instale as dependências.**
 
@@ -54,7 +54,7 @@ Depois de instalar, de dentro da pasta `desafio_Amplo`:
 
 O comando acima executa a curadoria completa sobre o primeiro conjunto de dados de exemplo (planilha `eDNA_cipo_subset.csv`), usa um dataset de espécies pré-detectadas na área como referência para a curadoria (parâmetro `--reference`, planilha `spp_tradicional.csv`) e por último executa um pequeno conjunto de análises ecológicas a partir dos resultados curados pela LLM (parâmetro `--ecologia`). No final é gerado um relatório em HTML, onde é possível acessar os resultados de cada etapa do processamento. 
 
-Todos os parâmetros (`--config`, `--reference`, `--ecologia`, `--ecologia-somente`, `--llm-mode`, entre outros) e mais exeplos de execução estão detalhados em [DOCUMENTATION.md](DOCUMENTATION.md#execução).
+Todos os parâmetros (`--config`, `--reference`, `--ecologia`, `--ecologia-somente`, `--llm-mode`, entre outros) e mais exeplos de execução estão detalhados em [DOCUMENTATION](DOCUMENTATION.md#execução).
 
 ## Rodando os testes
 
