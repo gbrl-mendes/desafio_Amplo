@@ -43,7 +43,13 @@ bash setup.sh
 Depois de instalar, de dentro da pasta `desafio_Amplo`:
 
 ```powershell
+# PowerShell (Windows)
 .venv\Scripts\python.exe -m harness data/example/exemplo_1/eDNA_cipo_subset.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia --groq-api-key <chave>
+```
+
+```bash
+# bash / Git Bash / WSL / Linux / Mac
+.venv/bin/python -m harness data/example/exemplo_1/eDNA_cipo_subset.csv --reference data/example/exemplo_1/spp_tradicional.csv --ecologia --groq-api-key <chave>
 ```
 
 O comando acima executa a curadoria completa sobre o primeiro conjunto de dados de exemplo (planilha `eDNA_cipo_subset.csv`), usa um dataset de espécies pré-detectadas na área como referência para a curadoria (parâmetro `--reference`, planilha `spp_tradicional.csv`) e por último executa um pequeno conjunto de análises ecológicas a partir dos resultados curados pela LLM (parâmetro `--ecologia`). No final é gerado um relatório em HTML, onde é possível acessar os resultados de cada etapa do processamento. 
@@ -54,8 +60,14 @@ Todos os parâmetros (`--config`, `--reference`, `--ecologia`, `--ecologia-somen
 
 Camada Python (`harness/`):
 
-```bash
+```powershell
+# PowerShell (Windows)
 .venv\Scripts\python.exe -m pytest tests/ -v
+```
+
+```bash
+# bash / Git Bash / WSL / Linux / Mac
+.venv/bin/python -m pytest tests/ -v
 ```
 
 Camada R (`r/curadoria_deterministica.R`):

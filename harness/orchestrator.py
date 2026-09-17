@@ -11,8 +11,8 @@ Divisao de responsabilidades (nenhuma logica de curadoria mora aqui):
   - harness/report_generation.py  relatorio narrativo da execucao em markdown
                                    (etapa opcional, apoiada por LLM sobre
                                    agregados ja calculados).
-  - harness/pdf_report.py         renderiza esse markdown como PDF (tema
-                                   Cayman), a entrega final do relatorio.
+  - harness/pdf_report.py         renderiza esse markdown como PDF (tema da
+                                   marca Amplo), a entrega final do relatorio.
   - harness/progress.py           narracao verbose obrigatoria (resumo da
                                    entrada, checkpoint) e a pergunta do
                                    checkpoint em si.
