@@ -78,7 +78,7 @@ Você deverá encontrar, entre outros, os arquivos `README.md`, `setup.ps1`, `se
 
 ### 5. Continue para a instalação
 
-A partir desta pasta, siga as instruções de instalação do [README](README.md), para uma versão mais enxuta da explicação ou Documentação completa, para uma explicação mais detalhada de todas as etapas.
+A partir desta pasta, siga as instruções de instalação do [README](README.md), para uma versão mais enxuta da explicação ou [Documentação completa](DOCUMENTATION.md), para uma explicação mais detalhada de todas as etapas.
 
 ## Alternativa: baixar como ZIP
 
