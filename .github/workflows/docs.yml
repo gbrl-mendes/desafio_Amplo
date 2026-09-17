@@ -18,6 +18,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install mkdocs-material
+      - name: Preparar pasta de documentação
+        run: |
+          mkdir -p site-docs
+          cp README.md DOMINIO_E_CONTRATO.md DOCUMENTATION.md DECISOES_E_LIMITACOES.md COMO_BAIXAR.md RELATORIO_EXEMPLO.html site-docs/
       - run: mkdocs build
       - uses: actions/upload-pages-artifact@v3
         with:
