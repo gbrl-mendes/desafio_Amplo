@@ -115,10 +115,13 @@ function Find-Rscript {
     $rscript = Get-Command Rscript -ErrorAction SilentlyContinue
     if ($rscript) { return $rscript.Source }
     # Mesmos locais que harness/orchestrator.py::find_rscript() tenta quando
-    # Rscript nao esta no PATH (o instalador do R nem sempre adiciona --
-    # manter os dois em sincronia se um mudar.
+    # Rscript nao esta no PATH -- manter os dois em sincronia se um mudar.
+    # O local por usuario (sem admin) foi confirmado numa maquina real:
+    # `winget install RProject.R` sem privilegio de administrador instala em
+    # %LOCALAPPDATA%\Programs\R, nao em "C:\Program Files\R".
     $candidates = @(Get-ChildItem "C:\Program Files\R\R-*\bin\Rscript.exe" -ErrorAction SilentlyContinue) +
-                  @(Get-ChildItem "C:\Program Files (x86)\R\R-*\bin\Rscript.exe" -ErrorAction SilentlyContinue)
+                  @(Get-ChildItem "C:\Program Files (x86)\R\R-*\bin\Rscript.exe" -ErrorAction SilentlyContinue) +
+                  @(Get-ChildItem "$env:LOCALAPPDATA\Programs\R\R-*\bin\Rscript.exe" -ErrorAction SilentlyContinue)
     if ($candidates.Count -gt 0) { return $candidates[0].FullName }
     return $null
 }

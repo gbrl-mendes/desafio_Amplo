@@ -8,6 +8,7 @@ rodar -> verificar -> logar).
 
 from __future__ import annotations
 
+import glob
 import json
 import re
 import subprocess
@@ -15,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from harness.orchestrator import run, run_ecologia_somente
+from harness.orchestrator import find_rscript, run, run_ecologia_somente
 from tools.schema_validation import load_schema
 
 SCHEMA = load_schema()
@@ -745,3 +746,37 @@ def test_html_report_generated_by_ecologia_somente(tmp_path):
     assert result.html_report_path is not None
     content = Path(result.html_report_path).read_text(encoding="utf-8")
     assert "Esta análise partiu de um CSV já curado" in content
+
+
+def test_find_rscript_checks_per_user_localappdata_when_missing_from_path_and_program_files(tmp_path, monkeypatch):
+    # Confirmado numa maquina real: `winget install RProject.R` sem privilegio
+    # de administrador instala em %LOCALAPPDATA%\Programs\R, nao em
+    # "C:\Program Files\R" -- sem este local na lista de busca, o harness
+    # nao achava o R mesmo recem-instalado (ver setup.ps1::Find-Rscript,
+    # mesma lista de locais). glob.glob mockado (nao so LOCALAPPDATA) porque
+    # esta maquina de dev tem um R real em Program Files, que senao vazaria
+    # pro teste e mascararia o comportamento sendo testado aqui.
+    real_glob = glob.glob
+    monkeypatch.setattr("harness.orchestrator.shutil.which", lambda name: None)
+    monkeypatch.setattr(
+        "harness.orchestrator.glob.glob",
+        lambda pattern: [] if "Program Files" in pattern else real_glob(pattern),
+    )
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    fake_bin_dir = tmp_path / "Programs" / "R" / "R-4.6.1" / "bin"
+    fake_bin_dir.mkdir(parents=True)
+    fake_rscript = fake_bin_dir / "Rscript.exe"
+    fake_rscript.write_text("")
+
+    result = find_rscript()
+
+    assert result is not None
+    assert Path(result) == fake_rscript
+
+
+def test_find_rscript_returns_none_when_nowhere_to_be_found(tmp_path, monkeypatch):
+    monkeypatch.setattr("harness.orchestrator.shutil.which", lambda name: None)
+    monkeypatch.setattr("harness.orchestrator.glob.glob", lambda pattern: [])
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))  # pasta vazia, sem R nenhum
+
+    assert find_rscript() is None

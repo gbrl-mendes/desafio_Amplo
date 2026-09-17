@@ -130,8 +130,18 @@ find_rscript() {
     return 0
   fi
   # Mesmos locais que harness/orchestrator.py::find_rscript() tenta quando
-  # Rscript nao esta no PATH -- manter os dois em sincronia se um mudar.
-  for candidate in "/c/Program Files/R"/R-*/bin/Rscript.exe "/c/Program Files (x86)/R"/R-*/bin/Rscript.exe; do
+  # Rscript nao esta no PATH -- manter os dois em sincronia se um mudar. O
+  # local por usuario (sem admin) foi confirmado numa maquina real: `winget
+  # install RProject.R` sem privilegio de administrador instala em
+  # %LOCALAPPDATA%\Programs\R, nao em "C:\Program Files\R". LOCALAPPDATA
+  # chega aqui como caminho estilo Windows (barras invertidas) -- cygpath
+  # (vem com o Git Bash) converte pro estilo /c/... que o bash entende.
+  local_app_data_posix="/c/no-such-path"
+  if [ -n "${LOCALAPPDATA:-}" ] && command -v cygpath >/dev/null 2>&1; then
+    local_app_data_posix="$(cygpath "$LOCALAPPDATA")"
+  fi
+  for candidate in "/c/Program Files/R"/R-*/bin/Rscript.exe "/c/Program Files (x86)/R"/R-*/bin/Rscript.exe \
+    "$local_app_data_posix/Programs/R"/R-*/bin/Rscript.exe; do
     if [ -x "$candidate" ]; then
       echo "$candidate"
       return 0

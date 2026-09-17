@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import glob
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -142,15 +143,22 @@ def find_rscript() -> Optional[str]:
     """Localiza o executavel Rscript: primeiro no PATH, depois em locais
     comuns de instalacao no Windows -- o R nem sempre entra no PATH de uma
     sessao de terminal que ja estava aberta antes da instalacao (aconteceu
-    nesta propria maquina durante o desenvolvimento)."""
+    nesta propria maquina durante o desenvolvimento). Inclui o local por
+    usuario (sem admin) alem do tradicional em Program Files: confirmado
+    numa maquina real que `winget install RProject.R` sem privilegio de
+    administrador instala em %LOCALAPPDATA%\\Programs\\R, nao em
+    "C:\\Program Files\\R" (ver setup.ps1::Find-Rscript, mesma lista)."""
     on_path = shutil.which("Rscript")
     if on_path:
         return on_path
 
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
     windows_globs = [
         "C:/Program Files/R/R-*/bin/Rscript.exe",
         "C:/Program Files (x86)/R/R-*/bin/Rscript.exe",
     ]
+    if local_app_data:
+        windows_globs.append(f"{local_app_data}/Programs/R/R-*/bin/Rscript.exe")
     for pattern in windows_globs:
         matches = sorted(glob.glob(pattern), reverse=True)
         if matches:
