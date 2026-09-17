@@ -54,7 +54,7 @@ Depois de instalar, de dentro da pasta `desafio_Amplo`:
 
 O comando acima executa a curadoria completa sobre o primeiro conjunto de dados de exemplo (planilha `eDNA_cipo_subset.csv`), usa um dataset de espécies pré-detectadas na área como referência para a curadoria (parâmetro `--reference`, planilha `spp_tradicional.csv`) e por último executa um pequeno conjunto de análises ecológicas a partir dos resultados curados pela LLM (parâmetro `--ecologia`). No final é gerado um relatório em HTML, onde é possível acessar os resultados de cada etapa do processamento. 
 
-Todos os parâmetros (`--config`, `--reference`, `--ecologia`, `--ecologia-somente`, `--llm-mode`, entre outros) e mais exeplos de execução estão detalhados em [DOCUMENTATION](DOCUMENTATION.md#execução).
+Todos os parâmetros (`--config`, `--reference`, `--ecologia`, `--ecologia-somente`, `--llm-mode`, entre outros) e mais exemplos de execução estão detalhados em [Documentação completa](DOCUMENTATION.md#execução).
 
 ## Rodando os testes
 
