@@ -17,10 +17,10 @@ theme:
 
 nav:
   - Início: README.md
+  - Como baixar: COMO_BAIXAR.md
   - Domínio e contrato: DOMINIO_E_CONTRATO.md
   - Documentação completa: DOCUMENTATION.md
   - Decisões e limitações: DECISOES_E_LIMITACOES.md
-  - Como baixar: COMO_BAIXAR.md
 
 markdown_extensions:
   - tables
