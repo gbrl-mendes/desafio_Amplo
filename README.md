@@ -2,9 +2,9 @@
 
 Este projeto implementa minha resposta ao desafio técnico do processo seletivo para a vaga de Cientista de Dados Pleno na Amplo Engenharia, desenvolvido segundo os parâmetros pré-definidos para os concorrentes.
 
-O problema resolvido, descrito em detalhes em [DOMINIO E CONTRATO](DOMINIO_E_CONTRATO.md), é hipotético: uma consultoria ambiental recebe uma tabela bruta de sequências de DNA ambiental e precisa transformá-la numa base de dados confiável sobre quais espécies existem numa área de estudo. Este é o sistema que a cientista de dados dessa consultoria executaria para resolver essa demanda, em qualquer projeto de metabarcoding que receber, independente do grupo taxonômico ou do substrato amostrado. Ele identifica cada sequência taxonomicamente, separa detecção real de contaminação, confere se o tamanho é compatível com o marcador genético usado, e, para os casos que essas três etapas não resolvem sozinhas, consulta um modelo de linguagem (LLM) com a evidência já calculada para uma segunda opinião. No final, o profissional humano ainda tem a possibilidade de definir, com base em tudo que foi gerado, quais são as identificações mais parcimoniosas.
+O problema resolvido, descrito em detalhes em [Domínio e contrato](DOMINIO_E_CONTRATO.md), é hipotético: uma consultoria ambiental recebe uma tabela bruta de sequências de DNA ambiental e precisa transformá-la numa base de dados confiável sobre quais espécies existem numa área de estudo. Este é o sistema que a cientista de dados dessa consultoria executaria para resolver essa demanda, em qualquer projeto de metabarcoding que receber, independente do grupo taxonômico ou do substrato amostrado. Ele identifica cada sequência taxonomicamente, separa detecção real de contaminação, confere se o tamanho é compatível com o marcador genético usado, e, para os casos que essas três etapas não resolvem sozinhas, consulta um modelo de linguagem (LLM) com a evidência já calculada para uma segunda opinião. No final, o profissional humano ainda tem a possibilidade de definir, com base em tudo que foi gerado, quais são as identificações mais parcimoniosas.
 
-Veja [DOMINIO E CONTRATO](DOMINIO_E_CONTRATO.md) para o problema, o domínio e as limitações declaradas deste sistema; [RELATORIO_EXEMPLO.html](RELATORIO_EXEMPLO.html) para uma execução real sobre o dado de demonstração, com achados concretos; e [DOCUMENTATION](DOCUMENTATION.md) para a arquitetura completa, todos os parâmetros de configuração e todos os exemplos de uso. Por último, o documento [DECISOES E LIMITACOES](DECISOES_E_LIMITACOES.md) oferece uma visão geral sobre o que foi decido durante o desenvolvimento deste projeto.
+Veja [Domínio e contrato](DOMINIO_E_CONTRATO.md) para o problema, o domínio e as limitações declaradas deste sistema; [Relatório exemplo](RELATORIO_EXEMPLO.html) para uma execução real sobre o dado de demonstração, com achados concretos; e [Documentação completa](DOCUMENTATION.md) para a arquitetura completa, todos os parâmetros de configuração e todos os exemplos de uso. Por último, o documento [Decisões e limitações](DECISOES_E_LIMITACOES.md) oferece uma visão geral sobre o que foi decido durante o desenvolvimento deste projeto.
 
 ## Requisitos
 
@@ -22,7 +22,7 @@ git clone https://github.com/gbrl-mendes/desafio_Amplo.git
 cd desafio_Amplo
 ```
 
-Sem Git instalado, ou preferindo não instalar: baixe como ZIP pela página do repositório (botão verde **Code** → **Download ZIP**), extraia, e abra um terminal dentro da pasta extraída. Passo a passo completo, com solução de problemas comuns, em [COMO BAIXAR](COMO_BAIXAR.md).
+Sem Git instalado, ou preferindo não instalar: baixe como ZIP pela página do repositório (botão verde **Code** → **Download ZIP**), extraia, e abra um terminal dentro da pasta extraída. Passo a passo completo, com solução de problemas comuns, em [Como baixar](COMO_BAIXAR.md).
 
 2. **Instale as dependências.**
 
