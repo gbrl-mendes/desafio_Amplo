@@ -4,7 +4,7 @@ repo_url: https://github.com/gbrl-mendes/desafio_Amplo
 repo_name: gbrl-mendes/desafio_Amplo
 
 docs_dir: .
-site_dir: site
+site_dir: /tmp/mkdocs-site
 exclude_docs: |
   harness/
   r/
