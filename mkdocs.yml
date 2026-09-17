@@ -3,22 +3,8 @@ site_description: Curadoria taxonômica de sequências de eDNA, resposta ao desa
 repo_url: https://github.com/gbrl-mendes/desafio_Amplo
 repo_name: gbrl-mendes/desafio_Amplo
 
-docs_dir: .
+docs_dir: site-docs
 site_dir: /tmp/mkdocs-site
-exclude_docs: |
-  harness/
-  r/
-  tools/
-  tests/
-  data/
-  runs/
-  .venv/
-  site/
-  *.py
-  *.R
-  *.qmd
-  *.csv
-  *.json
 
 theme:
   name: material
